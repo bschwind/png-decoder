@@ -6,3 +6,4 @@ edition = "2018"
 
 [dependencies]
 num_enum = { version = "0.5", features = [] }
+miniz_oxide = { version = "0.4.3", features = [] }
