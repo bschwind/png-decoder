@@ -16,7 +16,7 @@ use num_enum::TryFromPrimitive;
 const PNG_MAGIC_BYTES: &[u8] = &[137, 80, 78, 71, 13, 10, 26, 10];
 
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, TryFromPrimitive)]
 pub enum BitDepth {
     One = 1,
     Two = 2,
@@ -34,7 +34,7 @@ pub enum BitDepth {
 // }
 
 #[repr(u8)]
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, TryFromPrimitive)]
 pub enum ColorType {
     Grayscale = 0,
     Rgb = 2,
@@ -52,6 +52,191 @@ impl ColorType {
             ColorType::GrayscaleAlpha => 2,
             ColorType::RgbAlpha => 4,
         }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+enum PixelType {
+    Grayscale1,
+    Grayscale2,
+    Grayscale4,
+    Grayscale8,
+
+    Rgb8,
+    Rgb16,
+
+    Palette1,
+    Palette2,
+    Palette4,
+    Palette8,
+
+    GrayscaleAlpha8,
+    GrayscaleAlpha16,
+
+    RgbAlpha8,
+    RgbAlpha16,
+}
+
+impl PixelType {
+    fn new(color_type: ColorType, bit_depth: BitDepth) -> Result<Self, DecodeError> {
+        let result = match color_type {
+            ColorType::Grayscale => match bit_depth {
+                BitDepth::One => PixelType::Grayscale1,
+                BitDepth::Two => PixelType::Grayscale2,
+                BitDepth::Four => PixelType::Grayscale4,
+                BitDepth::Eight => PixelType::Grayscale8,
+                _ => return Err(DecodeError::InvalidColorTypeBitDepthCombination),
+            },
+            ColorType::Rgb => match bit_depth {
+                BitDepth::Eight => PixelType::Rgb8,
+                BitDepth::Sixteen => PixelType::Rgb16,
+                _ => return Err(DecodeError::InvalidColorTypeBitDepthCombination),
+            },
+            ColorType::Palette => match bit_depth {
+                BitDepth::One => PixelType::Palette1,
+                BitDepth::Two => PixelType::Palette2,
+                BitDepth::Four => PixelType::Palette4,
+                BitDepth::Eight => PixelType::Palette8,
+                _ => return Err(DecodeError::InvalidColorTypeBitDepthCombination),
+            },
+            ColorType::GrayscaleAlpha => match bit_depth {
+                BitDepth::Eight => PixelType::GrayscaleAlpha8,
+                BitDepth::Sixteen => PixelType::GrayscaleAlpha16,
+                _ => return Err(DecodeError::InvalidColorTypeBitDepthCombination),
+            },
+            ColorType::RgbAlpha => match bit_depth {
+                BitDepth::Eight => PixelType::RgbAlpha8,
+                BitDepth::Sixteen => PixelType::RgbAlpha16,
+                _ => return Err(DecodeError::InvalidColorTypeBitDepthCombination),
+            },
+        };
+
+        Ok(result)
+    }
+}
+
+struct ScanlineIterator<'a> {
+    image_width: usize, // Width in pixels
+    pixel_cursor: usize,
+    pixel_type: PixelType,
+    scanline: &'a [u8],
+}
+
+impl<'a> ScanlineIterator<'a> {
+    fn new(image_width: u32, pixel_type: PixelType, scanline: &'a [u8]) -> Self {
+        // TODO - Assert scanline.len() == bytes_per_pixel * image_width
+        Self { image_width: image_width as usize, pixel_cursor: 0, pixel_type, scanline }
+    }
+}
+
+impl<'a> Iterator for ScanlineIterator<'a> {
+    type Item = (u8, u8, u8, u8);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pixel_cursor >= self.image_width {
+            return None;
+        }
+
+        let pixel = match self.pixel_type {
+            PixelType::Grayscale1 => {
+                let byte = self.scanline[self.pixel_cursor / 8];
+                let bit_offset = 7 - self.pixel_cursor % 8;
+                let grayscale_val = (byte >> bit_offset) & 1;
+                let pixel_val = grayscale_val * 255;
+                Some((pixel_val, pixel_val, pixel_val, 255))
+            },
+            PixelType::Grayscale2 => {
+                let byte = self.scanline[self.pixel_cursor / 4];
+                let bit_offset = 6 - ((self.pixel_cursor % 4) * 2);
+                let grayscale_val = (byte >> bit_offset) & 0b11;
+
+                // TODO - use a lookup table
+                let pixel_val = ((grayscale_val as f32 / 4.0) * 255.0) as u8;
+                Some((pixel_val, pixel_val, pixel_val, 255))
+            },
+            PixelType::Grayscale4 => {
+                let byte = self.scanline[self.pixel_cursor / 2];
+                let bit_offset = 4 - ((self.pixel_cursor % 2) * 4);
+                let grayscale_val = (byte >> bit_offset) & 0b1111;
+
+                // TODO - use a lookup table
+                let pixel_val = ((grayscale_val as f32 / 16.0) * 255.0) as u8;
+                Some((pixel_val, pixel_val, pixel_val, 255))
+            },
+            PixelType::Grayscale8 => {
+                let byte = self.scanline[self.pixel_cursor];
+                Some((byte, byte, byte, 255))
+            },
+            PixelType::Rgb8 => {
+                let offset = self.pixel_cursor * 3;
+                let r = self.scanline[offset];
+                let g = self.scanline[offset + 1];
+                let b = self.scanline[offset + 2];
+
+                Some((r, g, b, 255))
+            },
+            PixelType::Rgb16 => {
+                let offset = self.pixel_cursor * 6;
+                let r = u16::from_be_bytes([self.scanline[offset], self.scanline[offset + 1]]);
+                let g = u16::from_be_bytes([self.scanline[offset + 2], self.scanline[offset + 3]]);
+                let b = u16::from_be_bytes([self.scanline[offset + 4], self.scanline[offset + 5]]);
+
+                let r = ((r as f32 / u16::MAX as f32) * 255.0) as u8;
+                let g = ((g as f32 / u16::MAX as f32) * 255.0) as u8;
+                let b = ((b as f32 / u16::MAX as f32) * 255.0) as u8;
+
+                Some((r, g, b, 255))
+            },
+            PixelType::Palette1 => Some((0, 0, 0, 0)),
+            PixelType::Palette2 => Some((0, 0, 0, 0)),
+            PixelType::Palette4 => Some((0, 0, 0, 0)),
+            PixelType::Palette8 => Some((0, 0, 0, 0)),
+            PixelType::GrayscaleAlpha8 => {
+                let offset = self.pixel_cursor * 2;
+                let grayscale_val = self.scanline[offset];
+                let alpha = self.scanline[offset + 1];
+
+                Some((grayscale_val, grayscale_val, grayscale_val, alpha))
+            },
+            PixelType::GrayscaleAlpha16 => {
+                let offset = self.pixel_cursor * 4;
+                let grayscale_val =
+                    u16::from_be_bytes([self.scanline[offset], self.scanline[offset + 1]]);
+                let alpha =
+                    u16::from_be_bytes([self.scanline[offset + 2], self.scanline[offset + 3]]);
+
+                let grayscale_val = ((grayscale_val as f32 / u16::MAX as f32) * 255.0) as u8;
+                let alpha = ((alpha as f32 / u16::MAX as f32) * 255.0) as u8;
+
+                Some((grayscale_val, grayscale_val, grayscale_val, alpha))
+            },
+            PixelType::RgbAlpha8 => {
+                let offset = self.pixel_cursor * 4;
+                let r = self.scanline[offset];
+                let g = self.scanline[offset + 1];
+                let b = self.scanline[offset + 2];
+                let a = self.scanline[offset + 3];
+
+                Some((r, g, b, a))
+            },
+            PixelType::RgbAlpha16 => {
+                let offset = self.pixel_cursor * 8;
+                let r = u16::from_be_bytes([self.scanline[offset], self.scanline[offset + 1]]);
+                let g = u16::from_be_bytes([self.scanline[offset + 2], self.scanline[offset + 3]]);
+                let b = u16::from_be_bytes([self.scanline[offset + 4], self.scanline[offset + 5]]);
+                let a = u16::from_be_bytes([self.scanline[offset + 6], self.scanline[offset + 7]]);
+
+                let r = ((r as f32 / u16::MAX as f32) * 255.0) as u8;
+                let g = ((g as f32 / u16::MAX as f32) * 255.0) as u8;
+                let b = ((b as f32 / u16::MAX as f32) * 255.0) as u8;
+                let a = ((a as f32 / u16::MAX as f32) * 255.0) as u8;
+
+                Some((r, g, b, a))
+            },
+        };
+
+        self.pixel_cursor += 1;
+        pixel
     }
 }
 
@@ -137,6 +322,7 @@ pub enum DecodeError {
 
     InvalidBitDepth,
     InvalidColorType,
+    InvalidColorTypeBitDepthCombination,
     InvalidCompressionMethod,
     InvalidFilterMethod,
     InvalidFilterType,
@@ -232,12 +418,101 @@ fn defilter(
         ((header.bit_depth as u32 * header.color_type.sample_multiplier()) + 7) / 8;
     println!("bytes_per_pixel - {}", bytes_per_pixel);
 
+    let pixel_type = PixelType::new(header.color_type, header.bit_depth)?;
+
     match header.interlace_method {
-        InterlaceMethod::None => {},
+        InterlaceMethod::None => {
+            // TODO(bschwind) - Deduplicate this logic.
+            let bytes_per_scanline = header.width * bytes_per_pixel;
+            let mut last_scanline = vec![0u8; bytes_per_scanline as usize];
+
+            for y in 0..header.height {
+                let filter_type = FilterType::try_from(scanline_data[cursor])
+                    .map_err(|_| DecodeError::InvalidFilterType)?;
+                cursor += 1;
+
+                println!("Filter type: {:?}", filter_type);
+                let current_scanline =
+                    &mut scanline_data[cursor..(cursor + bytes_per_scanline as usize)];
+
+                for x in 0..(bytes_per_scanline as usize) {
+                    let unfiltered_byte = match filter_type {
+                        FilterType::None => current_scanline[x],
+                        FilterType::Sub => {
+                            if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
+                                current_scanline[x].wrapping_add(current_scanline[idx])
+                            } else {
+                                current_scanline[x]
+                            }
+                        },
+                        FilterType::Up => current_scanline[x] + last_scanline[x],
+                        FilterType::Average => {
+                            if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
+                                let avg =
+                                    (current_scanline[x] as u16 + current_scanline[idx] as u16) / 2;
+                                avg as u8
+                            } else {
+                                last_scanline[x] / 2
+                            }
+                        },
+                        FilterType::Paeth => {
+                            if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
+                                let left = current_scanline[idx];
+                                let above = last_scanline[x];
+                                let upper_left = last_scanline[idx];
+
+                                let predictor = paeth_predictor(left, above, upper_left);
+
+                                current_scanline[x] + predictor
+                            } else {
+                                let left = 0;
+                                let above = last_scanline[x];
+                                let upper_left = 0;
+
+                                let predictor = paeth_predictor(left, above, upper_left);
+
+                                current_scanline[x] + predictor
+                            }
+                        },
+                    };
+
+                    current_scanline[x] = unfiltered_byte;
+                }
+
+                let scanline_iter =
+                    ScanlineIterator::new(header.width, pixel_type, current_scanline);
+
+                for (idx, (r, g, b, a)) in scanline_iter.enumerate() {
+                    // Put rgba in output_rgba
+                    let (output_x, output_y) = (idx, y);
+
+                    let output_idx =
+                        (output_y as usize * header.width as usize * 4) + (output_x * 4);
+                    output_rgba[output_idx] = r;
+                    output_rgba[output_idx + 1] = g;
+                    output_rgba[output_idx + 2] = b;
+                    output_rgba[output_idx + 3] = a;
+                }
+
+                last_scanline.copy_from_slice(current_scanline);
+
+                cursor += bytes_per_scanline as usize;
+            }
+        },
         InterlaceMethod::Adam7 => {
             // let max_bytes_per_scanline = ((header.width * header.bit_depth as u32 * header.color_type.sample_multiplier()) + 7) / 8;
             let max_bytes_per_scanline = header.width * bytes_per_pixel;
             let mut last_scanline = vec![0u8; max_bytes_per_scanline as usize];
+
+            // Adam7 Interlacing Pattern
+            // 1 6 4 6 2 6 4 6
+            // 7 7 7 7 7 7 7 7
+            // 5 6 5 6 5 6 5 6
+            // 7 7 7 7 7 7 7 7
+            // 3 6 4 6 3 6 4 6
+            // 7 7 7 7 7 7 7 7
+            // 5 6 5 6 5 6 5 6
+            // 7 7 7 7 7 7 7 7
 
             for pass in 1..=7 {
                 let (pass_width, pass_height) = match pass {
@@ -247,18 +522,18 @@ fn defilter(
                         (pass_width, pass_height)
                     },
                     2 => {
-                        let pass_width = (header.width / 8) + ((header.width % 8) / 4);
+                        let pass_width = (header.width / 8) + ((header.width % 8) / 5);
                         let pass_height = (header.height + 7) / 8;
                         (pass_width, pass_height)
                     },
                     3 => {
-                        let pass_width = (header.width + 3) / 4;
-                        let pass_height = (header.height / 8) + ((header.height % 8) / 4);
+                        let pass_width = ((header.width / 8) * 2) + (header.width % 8 + 3) / 4;
+                        let pass_height = (header.height / 8) + ((header.height % 8) / 5);
                         (pass_width, pass_height)
                     },
                     4 => {
-                        let pass_width = (header.width / 4) + (header.width % 4) / 2;
-                        let pass_height = (header.width + 3) / 4;
+                        let pass_width = ((header.width / 8) * 2) + (header.width % 8) / 6;
+                        let pass_height = (header.height + 3) / 4;
                         (pass_width, pass_height)
                     },
                     5 => {
@@ -300,7 +575,7 @@ fn defilter(
                     *byte = 0;
                 }
 
-                for _y in 0..pass_height {
+                for y in 0..pass_height {
                     let filter_type = FilterType::try_from(scanline_data[cursor])
                         .map_err(|_| DecodeError::InvalidFilterType)?;
                     cursor += 1;
@@ -314,7 +589,7 @@ fn defilter(
                             FilterType::None => current_scanline[x],
                             FilterType::Sub => {
                                 if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
-                                    current_scanline[x] + current_scanline[idx]
+                                    current_scanline[x].wrapping_add(current_scanline[idx])
                                 } else {
                                     current_scanline[x]
                                 }
@@ -322,19 +597,60 @@ fn defilter(
                             FilterType::Up => current_scanline[x] + last_scanline[x],
                             FilterType::Average => {
                                 if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
-                                    (current_scanline[x] + current_scanline[idx]) / 2
+                                    let avg = (current_scanline[x] as u16
+                                        + current_scanline[idx] as u16)
+                                        / 2;
+                                    avg as u8
                                 } else {
                                     last_scanline[x] / 2
                                 }
                             },
                             FilterType::Paeth => {
-                                // TODO - Implement
-                                current_scanline[x]
+                                if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
+                                    let left = current_scanline[idx];
+                                    let above = last_scanline[x];
+                                    let upper_left = last_scanline[idx];
+
+                                    let predictor = paeth_predictor(left, above, upper_left);
+
+                                    current_scanline[x] + predictor
+                                } else {
+                                    let left = 0;
+                                    let above = last_scanline[x];
+                                    let upper_left = 0;
+
+                                    let predictor = paeth_predictor(left, above, upper_left);
+
+                                    current_scanline[x] + predictor
+                                }
                             },
                         };
 
-                        println!("unfiltered_byte: {}", unfiltered_byte);
                         current_scanline[x] = unfiltered_byte;
+                    }
+
+                    let scanline_iter =
+                        ScanlineIterator::new(pass_width, pixel_type, current_scanline);
+
+                    for (idx, (r, g, b, a)) in scanline_iter.enumerate() {
+                        // Put rgba in output_rgba
+                        let (output_x, output_y) = match pass {
+                            1 => (idx * 8, y * 8),
+                            2 => (idx * 8 + 4, y * 8),
+                            3 => (idx * 4, y * 8 + 4),
+                            4 => (idx * 4 + 2, y * 4),
+                            5 => (idx * 2, y * 4 + 2),
+                            6 => (idx * 2 + 1, y * 2),
+                            7 => (idx, y * 2 + 1),
+                            _ => (0, 0),
+                        };
+
+                        let output_idx =
+                            (output_y as usize * header.width as usize * 4) + (output_x * 4);
+                        output_rgba[output_idx] = r;
+                        output_rgba[output_idx + 1] = g;
+                        output_rgba[output_idx + 2] = b;
+                        output_rgba[output_idx + 3] = a;
                     }
 
                     last_scanline.copy_from_slice(current_scanline);
@@ -346,6 +662,25 @@ fn defilter(
     }
 
     Ok(())
+}
+
+fn paeth_predictor(a: u8, b: u8, c: u8) -> u8 {
+    // TODO(bschwind) - Accept i16 or convert once and store in a temp.
+    // a = left pixel
+    // b = above pixel
+    // c = upper left
+    let p = a as i16 + b as i16 - c as i16;
+    let pa = (p as i16 - a as i16).abs();
+    let pb = (p as i16 - b as i16).abs();
+    let pc = (p as i16 - c as i16).abs();
+
+    if pa <= pb && pa <= pc {
+        a
+    } else if pb <= pc {
+        b
+    } else {
+        c
+    }
 }
 
 pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<Color>), DecodeError> {
@@ -382,14 +717,11 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<Color>), DecodeError> {
     let mut scanline_data = miniz_oxide::inflate::decompress_to_vec_zlib(&compressed_data)
         .map_err(|e| DecodeError::Decompress(e))?;
 
+    // For now, output data is always RGBA, 1 byte per channel.
     let mut output_rgba = vec![0u8; header.width as usize * header.height as usize * 4];
 
     // Defilter bytes
     defilter(&header, &mut scanline_data, &mut output_rgba)?;
-
-    // Deinterlace if needed
-
-    println!("scanline_data: {:?}", scanline_data);
 
     println!("Decompression success!");
     println!("Final image size: {}", scanline_data.len());
@@ -406,13 +738,19 @@ mod tests {
         let test_png_bytes = include_bytes!("../test_pngs/png_suite/basi0g01.png");
         let result = decode(test_png_bytes);
 
-        // let test_png_bytes = include_bytes!("../test_pngs/png_suite/oi4n2c16.png");
-        // let result = decode(test_png_bytes);
+        let test_png_bytes = include_bytes!("../test_pngs/png_suite/oi4n2c16.png");
+        let result = decode(test_png_bytes);
 
-        // let test_png_bytes = include_bytes!("../test_pngs/1x1.png");
-        // let result = decode(test_png_bytes);
+        let test_png_bytes = include_bytes!("../test_pngs/1x1.png");
+        let result = decode(test_png_bytes);
 
         let test_png_bytes = include_bytes!("../test_pngs/3x3.png");
+        let result = decode(test_png_bytes);
+
+        let test_png_bytes = include_bytes!("../test_pngs/paeth.png");
+        let result = decode(test_png_bytes);
+
+        let test_png_bytes = include_bytes!("../test_pngs/15x15.png");
         let result = decode(test_png_bytes);
 
         println!("Result: {:?}", result);
