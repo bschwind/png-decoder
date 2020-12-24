@@ -421,7 +421,84 @@ fn defilter(
     let pixel_type = PixelType::new(header.color_type, header.bit_depth)?;
 
     match header.interlace_method {
-        InterlaceMethod::None => {},
+        InterlaceMethod::None => {
+            // TODO(bschwind) - Deduplicate this logic.
+            let bytes_per_scanline = header.width * bytes_per_pixel;
+            let mut last_scanline = vec![0u8; bytes_per_scanline as usize];
+
+            for y in 0..header.height {
+                let filter_type = FilterType::try_from(scanline_data[cursor])
+                    .map_err(|_| DecodeError::InvalidFilterType)?;
+                cursor += 1;
+
+                println!("Filter type: {:?}", filter_type);
+                let current_scanline =
+                    &mut scanline_data[cursor..(cursor + bytes_per_scanline as usize)];
+
+                for x in 0..(bytes_per_scanline as usize) {
+                    let unfiltered_byte = match filter_type {
+                        FilterType::None => current_scanline[x],
+                        FilterType::Sub => {
+                            if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
+                                current_scanline[x].wrapping_add(current_scanline[idx])
+                            } else {
+                                current_scanline[x]
+                            }
+                        },
+                        FilterType::Up => current_scanline[x] + last_scanline[x],
+                        FilterType::Average => {
+                            if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
+                                let avg =
+                                    (current_scanline[x] as u16 + current_scanline[idx] as u16) / 2;
+                                avg as u8
+                            } else {
+                                last_scanline[x] / 2
+                            }
+                        },
+                        FilterType::Paeth => {
+                            if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
+                                let left = current_scanline[idx];
+                                let above = last_scanline[x];
+                                let upper_left = last_scanline[idx];
+
+                                let predictor = paeth_predictor(left, above, upper_left);
+
+                                current_scanline[x] + predictor
+                            } else {
+                                let left = 0;
+                                let above = last_scanline[x];
+                                let upper_left = 0;
+
+                                let predictor = paeth_predictor(left, above, upper_left);
+
+                                current_scanline[x] + predictor
+                            }
+                        },
+                    };
+
+                    current_scanline[x] = unfiltered_byte;
+                }
+
+                let scanline_iter =
+                    ScanlineIterator::new(header.width, pixel_type, current_scanline);
+
+                for (idx, (r, g, b, a)) in scanline_iter.enumerate() {
+                    // Put rgba in output_rgba
+                    let (output_x, output_y) = (idx, y);
+
+                    let output_idx =
+                        (output_y as usize * header.width as usize * 4) + (output_x * 4);
+                    output_rgba[output_idx] = r;
+                    output_rgba[output_idx + 1] = g;
+                    output_rgba[output_idx + 2] = b;
+                    output_rgba[output_idx + 3] = a;
+                }
+
+                last_scanline.copy_from_slice(current_scanline);
+
+                cursor += bytes_per_scanline as usize;
+            }
+        },
         InterlaceMethod::Adam7 => {
             // let max_bytes_per_scanline = ((header.width * header.bit_depth as u32 * header.color_type.sample_multiplier()) + 7) / 8;
             let max_bytes_per_scanline = header.width * bytes_per_pixel;
@@ -671,6 +748,9 @@ mod tests {
         let result = decode(test_png_bytes);
 
         let test_png_bytes = include_bytes!("../test_pngs/paeth.png");
+        let result = decode(test_png_bytes);
+
+        let test_png_bytes = include_bytes!("../test_pngs/15x15.png");
         let result = decode(test_png_bytes);
 
         println!("Result: {:?}", result);
