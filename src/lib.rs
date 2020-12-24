@@ -431,7 +431,6 @@ fn defilter(
                     .map_err(|_| DecodeError::InvalidFilterType)?;
                 cursor += 1;
 
-                println!("Filter type: {:?}", filter_type);
                 let current_scanline =
                     &mut scanline_data[cursor..(cursor + bytes_per_scanline as usize)];
 
@@ -556,7 +555,6 @@ fn defilter(
 
                 // Skip empty passes.
                 if pass_width == 0 || pass_height == 0 {
-                    println!("Pass {} - Empty", pass);
                     continue;
                 }
 
@@ -565,10 +563,6 @@ fn defilter(
                     * header.color_type.sample_multiplier())
                     + 7)
                     / 8;
-                println!(
-                    "Pass {}, {}x{}, bytes_per_scanline={}",
-                    pass, pass_width, pass_height, bytes_per_scanline
-                );
 
                 let last_scanline = &mut last_scanline[..(bytes_per_scanline as usize)];
                 for byte in last_scanline.iter_mut() {
@@ -580,7 +574,6 @@ fn defilter(
                         .map_err(|_| DecodeError::InvalidFilterType)?;
                     cursor += 1;
 
-                    println!("Filter type: {:?}", filter_type);
                     let current_scanline =
                         &mut scanline_data[cursor..(cursor + bytes_per_scanline as usize)];
 
@@ -597,12 +590,13 @@ fn defilter(
                             FilterType::Up => current_scanline[x] + last_scanline[x],
                             FilterType::Average => {
                                 if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
-                                    let avg = (current_scanline[x] as u16
-                                        + current_scanline[idx] as u16)
+                                    let avg = (current_scanline[idx] as u16
+                                        + last_scanline[x] as u16)
                                         / 2;
-                                    avg as u8
+                                    ((current_scanline[x] as u16 + avg) % 256) as u8
                                 } else {
-                                    last_scanline[x] / 2
+                                    ((current_scanline[x] as u16 + (last_scanline[x] as u16 / 2))
+                                        % 256) as u8
                                 }
                             },
                             FilterType::Paeth => {
@@ -695,7 +689,6 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<Color>), DecodeError> {
     let bytes = &bytes[PNG_MAGIC_BYTES.len()..];
 
     let header_chunk = read_chunk(bytes)?;
-    println!("header chunk: {:?}", header_chunk);
     let header = PngHeader::from_chunk(&header_chunk)?;
     println!("Png Header: {:#?}", header);
 
