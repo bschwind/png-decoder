@@ -523,6 +523,16 @@ fn defilter(
             let max_bytes_per_scanline = header.width * bytes_per_pixel;
             let mut last_scanline = vec![0u8; max_bytes_per_scanline as usize];
 
+            // Adam7 Interlacing Pattern
+            // 1 6 4 6 2 6 4 6
+            // 7 7 7 7 7 7 7 7
+            // 5 6 5 6 5 6 5 6
+            // 7 7 7 7 7 7 7 7
+            // 3 6 4 6 3 6 4 6
+            // 7 7 7 7 7 7 7 7
+            // 5 6 5 6 5 6 5 6
+            // 7 7 7 7 7 7 7 7
+
             for pass in 1..=7 {
                 let (pass_width, pass_height) = match pass {
                     1 => {
@@ -584,7 +594,7 @@ fn defilter(
                     *byte = 0;
                 }
 
-                for _y in 0..pass_height {
+                for y in 0..pass_height {
                     let filter_type = FilterType::try_from(scanline_data[cursor])
                         .map_err(|_| DecodeError::InvalidFilterType)?;
                     cursor += 1;
@@ -635,15 +645,31 @@ fn defilter(
                             },
                         };
 
-                        println!("unfiltered_byte: {}", unfiltered_byte);
                         current_scanline[x] = unfiltered_byte;
                     }
 
                     let scanline_iter =
                         ScanlineIterator::new(pass_width, pixel_type, current_scanline);
 
-                    for (r, g, b, a) in scanline_iter {
+                    for (idx, (r, g, b, a)) in scanline_iter.enumerate() {
                         // Put rgba in output_rgba
+                        let (output_x, output_y) = match pass {
+                            1 => (idx * 8, y * 8),
+                            2 => (idx * 8 + 4, y * 8),
+                            3 => (idx * 4, y * 8 + 4),
+                            4 => (idx * 4 + 2, y * 4),
+                            5 => (idx * 2, y * 4 + 2),
+                            6 => (idx * 2 + 1, y * 2),
+                            7 => (idx, y * 2 + 1),
+                            _ => (0, 0),
+                        };
+
+                        let output_idx =
+                            (output_y as usize * header.width as usize * 4) + (output_x * 4);
+                        output_rgba[output_idx] = r;
+                        output_rgba[output_idx + 1] = g;
+                        output_rgba[output_idx + 2] = b;
+                        output_rgba[output_idx + 3] = a;
                     }
 
                     last_scanline.copy_from_slice(current_scanline);
@@ -715,10 +741,6 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<Color>), DecodeError> {
 
     // Defilter bytes
     defilter(&header, &mut scanline_data, &mut output_rgba)?;
-
-    // Deinterlace if needed
-
-    println!("scanline_data: {:?}", scanline_data);
 
     println!("Decompression success!");
     println!("Final image size: {}", scanline_data.len());
