@@ -531,18 +531,18 @@ fn defilter(
                         (pass_width, pass_height)
                     },
                     2 => {
-                        let pass_width = (header.width / 8) + ((header.width % 8) / 4);
+                        let pass_width = (header.width / 8) + ((header.width % 8) / 5);
                         let pass_height = (header.height + 7) / 8;
                         (pass_width, pass_height)
                     },
                     3 => {
-                        let pass_width = (header.width + 3) / 4;
-                        let pass_height = (header.height / 8) + ((header.height % 8) / 4);
+                        let pass_width = ((header.width / 8) * 2) + (header.width % 8 + 3) / 4;
+                        let pass_height = (header.height / 8) + ((header.height % 8) / 5);
                         (pass_width, pass_height)
                     },
                     4 => {
-                        let pass_width = (header.width / 4) + (header.width % 4) / 2;
-                        let pass_height = (header.width + 3) / 4;
+                        let pass_width = ((header.width / 8) * 2) + (header.width % 8) / 6;
+                        let pass_height = (header.height + 3) / 4;
                         (pass_width, pass_height)
                     },
                     5 => {
@@ -640,7 +640,7 @@ fn defilter(
                     }
 
                     let scanline_iter =
-                        ScanlineIterator::new(header.width, pixel_type, current_scanline);
+                        ScanlineIterator::new(pass_width, pixel_type, current_scanline);
 
                     for (r, g, b, a) in scanline_iter {
                         // Put rgba in output_rgba
@@ -732,17 +732,17 @@ mod tests {
 
     #[test]
     fn it_works() {
-        // let test_png_bytes = include_bytes!("../test_pngs/png_suite/basi0g01.png");
-        // let result = decode(test_png_bytes);
+        let test_png_bytes = include_bytes!("../test_pngs/png_suite/basi0g01.png");
+        let result = decode(test_png_bytes);
 
-        // let test_png_bytes = include_bytes!("../test_pngs/png_suite/oi4n2c16.png");
-        // let result = decode(test_png_bytes);
+        let test_png_bytes = include_bytes!("../test_pngs/png_suite/oi4n2c16.png");
+        let result = decode(test_png_bytes);
 
-        // let test_png_bytes = include_bytes!("../test_pngs/1x1.png");
-        // let result = decode(test_png_bytes);
+        let test_png_bytes = include_bytes!("../test_pngs/1x1.png");
+        let result = decode(test_png_bytes);
 
-        // let test_png_bytes = include_bytes!("../test_pngs/3x3.png");
-        // let result = decode(test_png_bytes);
+        let test_png_bytes = include_bytes!("../test_pngs/3x3.png");
+        let result = decode(test_png_bytes);
 
         let test_png_bytes = include_bytes!("../test_pngs/paeth.png");
         let result = decode(test_png_bytes);
