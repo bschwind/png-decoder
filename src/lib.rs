@@ -924,7 +924,6 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
 
     let header_chunk = read_chunk(bytes)?;
     let header = PngHeader::from_chunk(&header_chunk)?;
-    println!("Png Header: {:#?}", header);
 
     let mut bytes = &bytes[header_chunk.byte_size()..];
 
@@ -945,27 +944,6 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
             },
             ChunkType::Background => ancillary_chunks.background = Some(chunk.data),
             _ => {},
-        }
-
-        if chunk.chunk_type == ChunkType::Palette {
-            println!("Palette: {:?}", chunk.data);
-        }
-
-        if chunk.chunk_type == ChunkType::Background {
-            println!("Background: {:?}", chunk.data);
-        }
-
-        if chunk.chunk_type == ChunkType::Transparency {
-            println!("Transparency: {:?}", chunk.data);
-        }
-
-        if chunk.chunk_type == ChunkType::Gamma {
-            println!("Gamma: {:?}", chunk.data);
-            let gamma_encoded =
-                u32::from_be_bytes([chunk.data[0], chunk.data[1], chunk.data[2], chunk.data[3]]);
-            let gamma_float = 100_000.0 / gamma_encoded as f32;
-            println!("gamma_encoded: {}", gamma_encoded);
-            println!("gamma_float: {}", gamma_float);
         }
 
         bytes = &bytes[chunk.byte_size()..];
@@ -1000,8 +978,6 @@ mod tests {
             if let Some(extension) = path.extension().and_then(|os_str| os_str.to_str()) {
                 match extension.to_ascii_lowercase().as_str() {
                     "png" => {
-                        println!("png path={}", path.to_string_lossy());
-
                         let png_bytes = std::fs::read(&path).unwrap();
 
                         let (header, decoded) =
