@@ -113,9 +113,14 @@ impl PixelType {
     }
 }
 
+#[inline]
+fn u16_to_u8(val: u16) -> u8 {
+    (val >> 8) as u8
+}
+
 struct AncillaryChunks<'a> {
     palette: Option<&'a [u8]>,
-    transparency: Option<&'a [u8]>,
+    transparency: Option<TransparencyChunk<'a>>,
     background: Option<&'a [u8]>,
 }
 
@@ -164,39 +169,90 @@ impl<'a> Iterator for ScanlineIterator<'a> {
                 let byte = self.scanline[self.pixel_cursor / 8];
                 let bit_offset = 7 - self.pixel_cursor % 8;
                 let grayscale_val = (byte >> bit_offset) & 1;
+
+                let alpha = match self.extra_chunks.transparency {
+                    Some(TransparencyChunk::Grayscale(transparent_val))
+                        if grayscale_val == transparent_val =>
+                    {
+                        0
+                    },
+                    _ => 255,
+                };
+
                 let pixel_val = grayscale_val * 255;
-                Some((pixel_val, pixel_val, pixel_val, 255))
+
+                Some((pixel_val, pixel_val, pixel_val, alpha))
             },
             PixelType::Grayscale2 => {
                 let byte = self.scanline[self.pixel_cursor / 4];
                 let bit_offset = 6 - ((self.pixel_cursor % 4) * 2);
                 let grayscale_val = (byte >> bit_offset) & 0b11;
 
+                let alpha = match self.extra_chunks.transparency {
+                    Some(TransparencyChunk::Grayscale(transparent_val))
+                        if grayscale_val == transparent_val =>
+                    {
+                        0
+                    },
+                    _ => 255,
+                };
+
                 // TODO - use a lookup table
-                let pixel_val = ((grayscale_val as f32 / 4.0) * 255.0) as u8;
-                Some((pixel_val, pixel_val, pixel_val, 255))
+                let pixel_val = ((grayscale_val as f32 / 3.0) * 255.0) as u8;
+
+                Some((pixel_val, pixel_val, pixel_val, alpha))
             },
             PixelType::Grayscale4 => {
                 let byte = self.scanline[self.pixel_cursor / 2];
                 let bit_offset = 4 - ((self.pixel_cursor % 2) * 4);
                 let grayscale_val = (byte >> bit_offset) & 0b1111;
 
+                let alpha = match self.extra_chunks.transparency {
+                    Some(TransparencyChunk::Grayscale(transparent_val))
+                        if grayscale_val == transparent_val =>
+                    {
+                        0
+                    },
+                    _ => 255,
+                };
+
                 // TODO - use a lookup table
                 let pixel_val = ((grayscale_val as f32 / 15.0) * 255.0) as u8;
-                Some((pixel_val, pixel_val, pixel_val, 255))
+                Some((pixel_val, pixel_val, pixel_val, alpha))
             },
             PixelType::Grayscale8 => {
                 let byte = self.scanline[self.pixel_cursor];
-                Some((byte, byte, byte, 255))
+
+                let alpha = match self.extra_chunks.transparency {
+                    Some(TransparencyChunk::Grayscale(transparent_val))
+                        if byte == transparent_val =>
+                    {
+                        0
+                    },
+                    _ => 255,
+                };
+                Some((byte, byte, byte, alpha))
             },
             PixelType::Grayscale16 => {
                 let offset = self.pixel_cursor * 2;
                 let grayscale_val =
                     u16::from_be_bytes([self.scanline[offset], self.scanline[offset + 1]]);
 
-                let grayscale_val = (grayscale_val >> 8) as u8;
+                let pixel_val = u16_to_u8(grayscale_val);
 
-                Some((grayscale_val, grayscale_val, grayscale_val, 255))
+                // TODO(bschwind) - This may need to be compared to the original
+                //                  16-bit transparency value, instead of the transformed
+                //                  8-bit value.
+                let alpha = match self.extra_chunks.transparency {
+                    Some(TransparencyChunk::Grayscale(transparent_val))
+                        if pixel_val == transparent_val =>
+                    {
+                        0
+                    },
+                    _ => 255,
+                };
+
+                Some((pixel_val, pixel_val, pixel_val, alpha))
             },
             PixelType::Rgb8 => {
                 let offset = self.pixel_cursor * 3;
@@ -204,7 +260,16 @@ impl<'a> Iterator for ScanlineIterator<'a> {
                 let g = self.scanline[offset + 1];
                 let b = self.scanline[offset + 2];
 
-                Some((r, g, b, 255))
+                let alpha = match self.extra_chunks.transparency {
+                    Some(TransparencyChunk::Rgb(t_r, t_g, t_b))
+                        if r == t_r && g == t_g && b == t_b =>
+                    {
+                        0
+                    },
+                    _ => 255,
+                };
+
+                Some((r, g, b, alpha))
             },
             PixelType::Rgb16 => {
                 let offset = self.pixel_cursor * 6;
@@ -212,11 +277,20 @@ impl<'a> Iterator for ScanlineIterator<'a> {
                 let g = u16::from_be_bytes([self.scanline[offset + 2], self.scanline[offset + 3]]);
                 let b = u16::from_be_bytes([self.scanline[offset + 4], self.scanline[offset + 5]]);
 
-                let r = (r >> 8) as u8;
-                let g = (g >> 8) as u8;
-                let b = (b >> 8) as u8;
+                let r = u16_to_u8(r);
+                let g = u16_to_u8(g);
+                let b = u16_to_u8(b);
 
-                Some((r, g, b, 255))
+                let alpha = match self.extra_chunks.transparency {
+                    Some(TransparencyChunk::Rgb(t_r, t_g, t_b))
+                        if r == t_r && g == t_g && b == t_b =>
+                    {
+                        0
+                    },
+                    _ => 255,
+                };
+
+                Some((r, g, b, alpha))
             },
             PixelType::Palette1 => {
                 let byte = self.scanline[self.pixel_cursor / 8];
@@ -231,10 +305,10 @@ impl<'a> Iterator for ScanlineIterator<'a> {
                 let b = palette[offset + 2];
 
                 let alpha: u8 = match self.extra_chunks.transparency {
-                    Some(transparency_chunk) => {
-                        *transparency_chunk.get(palette_idx).unwrap_or(&255)
+                    Some(TransparencyChunk::Palette(data)) => {
+                        *data.get(palette_idx).unwrap_or(&255)
                     },
-                    None => 255,
+                    Some(_) | None => 255,
                 };
 
                 Some((r, g, b, alpha))
@@ -252,10 +326,10 @@ impl<'a> Iterator for ScanlineIterator<'a> {
                 let b = palette[offset + 2];
 
                 let alpha: u8 = match self.extra_chunks.transparency {
-                    Some(transparency_chunk) => {
-                        *transparency_chunk.get(palette_idx).unwrap_or(&255)
+                    Some(TransparencyChunk::Palette(data)) => {
+                        *data.get(palette_idx).unwrap_or(&255)
                     },
-                    None => 255,
+                    Some(_) | None => 255,
                 };
 
                 Some((r, g, b, alpha))
@@ -273,10 +347,10 @@ impl<'a> Iterator for ScanlineIterator<'a> {
                 let b = palette[offset + 2];
 
                 let alpha: u8 = match self.extra_chunks.transparency {
-                    Some(transparency_chunk) => {
-                        *transparency_chunk.get(palette_idx).unwrap_or(&255)
+                    Some(TransparencyChunk::Palette(data)) => {
+                        *data.get(palette_idx).unwrap_or(&255)
                     },
-                    None => 255,
+                    Some(_) | None => 255,
                 };
 
                 Some((r, g, b, alpha))
@@ -290,8 +364,8 @@ impl<'a> Iterator for ScanlineIterator<'a> {
                 let b = palette[offset + 2];
 
                 let alpha: u8 = match self.extra_chunks.transparency {
-                    Some(transparency_chunk) => *transparency_chunk.get(offset).unwrap_or(&255),
-                    None => 255,
+                    Some(TransparencyChunk::Palette(data)) => *data.get(offset).unwrap_or(&255),
+                    Some(_) | None => 255,
                 };
 
                 Some((r, g, b, alpha))
@@ -310,8 +384,8 @@ impl<'a> Iterator for ScanlineIterator<'a> {
                 let alpha =
                     u16::from_be_bytes([self.scanline[offset + 2], self.scanline[offset + 3]]);
 
-                let grayscale_val = (grayscale_val >> 8) as u8;
-                let alpha = (alpha >> 8) as u8;
+                let grayscale_val = u16_to_u8(grayscale_val);
+                let alpha = u16_to_u8(alpha);
 
                 Some((grayscale_val, grayscale_val, grayscale_val, alpha))
             },
@@ -331,10 +405,10 @@ impl<'a> Iterator for ScanlineIterator<'a> {
                 let b = u16::from_be_bytes([self.scanline[offset + 4], self.scanline[offset + 5]]);
                 let a = u16::from_be_bytes([self.scanline[offset + 6], self.scanline[offset + 7]]);
 
-                let r = (r >> 8) as u8;
-                let g = (g >> 8) as u8;
-                let b = (b >> 8) as u8;
-                let a = (a >> 8) as u8;
+                let r = u16_to_u8(r);
+                let g = u16_to_u8(g);
+                let b = u16_to_u8(b);
+                let a = u16_to_u8(a);
 
                 Some((r, g, b, a))
             },
@@ -488,6 +562,47 @@ impl<'a> Chunk<'a> {
     }
 }
 
+enum TransparencyChunk<'a> {
+    Palette(&'a [u8]),
+    Grayscale(u8),
+    Rgb(u8, u8, u8),
+}
+
+impl<'a> TransparencyChunk<'a> {
+    fn from_chunk(chunk: &Chunk<'a>, pixel_type: PixelType) -> Option<Self> {
+        match pixel_type {
+            PixelType::Grayscale1 => Some(TransparencyChunk::Grayscale(chunk.data[1] & 0b1)),
+            PixelType::Grayscale2 => Some(TransparencyChunk::Grayscale(chunk.data[1] & 0b11)),
+            PixelType::Grayscale4 => Some(TransparencyChunk::Grayscale(chunk.data[1] & 0b1111)),
+            PixelType::Grayscale8 => Some(TransparencyChunk::Grayscale(chunk.data[1])),
+            PixelType::Grayscale16 => {
+                let val = u16::from_be_bytes([chunk.data[0], chunk.data[1]]);
+                Some(TransparencyChunk::Grayscale(u16_to_u8(val)))
+            },
+            PixelType::Rgb8 => {
+                let r = chunk.data[1];
+                let g = chunk.data[3];
+                let b = chunk.data[5];
+                Some(TransparencyChunk::Rgb(r, g, b))
+            },
+            PixelType::Rgb16 => {
+                let r = u16::from_be_bytes([chunk.data[0], chunk.data[1]]);
+                let g = u16::from_be_bytes([chunk.data[2], chunk.data[3]]);
+                let b = u16::from_be_bytes([chunk.data[4], chunk.data[5]]);
+                Some(TransparencyChunk::Rgb(u16_to_u8(r), u16_to_u8(g), u16_to_u8(b)))
+            },
+            PixelType::Palette1 => Some(TransparencyChunk::Palette(chunk.data)),
+            PixelType::Palette2 => Some(TransparencyChunk::Palette(chunk.data)),
+            PixelType::Palette4 => Some(TransparencyChunk::Palette(chunk.data)),
+            PixelType::Palette8 => Some(TransparencyChunk::Palette(chunk.data)),
+            PixelType::GrayscaleAlpha8 => None,
+            PixelType::GrayscaleAlpha16 => None,
+            PixelType::RgbAlpha8 => None,
+            PixelType::RgbAlpha16 => None,
+        }
+    }
+}
+
 fn read_u32(bytes: &[u8], offset: usize) -> u32 {
     u32::from_be_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
 }
@@ -517,12 +632,11 @@ fn defilter(
     scanline_data: &mut [u8],
     output_rgba: &mut [u8],
     ancillary_chunks: &AncillaryChunks,
+    pixel_type: PixelType,
 ) -> Result<(), DecodeError> {
     let mut cursor = 0;
     let bytes_per_pixel =
         ((header.bit_depth as u32 * header.color_type.sample_multiplier()) + 7) / 8;
-
-    let pixel_type = PixelType::new(header.color_type, header.bit_depth)?;
 
     match header.interlace_method {
         InterlaceMethod::None => {
@@ -817,17 +931,18 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
     let mut compressed_data: Vec<u8> =
         Vec::with_capacity(header.width as usize * header.height as usize * 3);
 
+    let pixel_type = PixelType::new(header.color_type, header.bit_depth)?;
     let mut ancillary_chunks = AncillaryChunks::default();
 
     while !bytes.is_empty() {
         let chunk = read_chunk(bytes)?;
 
-        println!("Chunk type: {:?}", chunk.chunk_type);
-
         match chunk.chunk_type {
             ChunkType::ImageData => compressed_data.extend_from_slice(chunk.data),
             ChunkType::Palette => ancillary_chunks.palette = Some(chunk.data),
-            ChunkType::Transparency => ancillary_chunks.transparency = Some(chunk.data),
+            ChunkType::Transparency => {
+                ancillary_chunks.transparency = TransparencyChunk::from_chunk(&chunk, pixel_type)
+            },
             ChunkType::Background => ancillary_chunks.background = Some(chunk.data),
             _ => {},
         }
@@ -863,7 +978,7 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
     let mut output_rgba = vec![0u8; header.width as usize * header.height as usize * 4];
 
     // Defilter bytes
-    defilter(&header, &mut scanline_data, &mut output_rgba, &ancillary_chunks)?;
+    defilter(&header, &mut scanline_data, &mut output_rgba, &ancillary_chunks, pixel_type)?;
 
     Ok((header, output_rgba))
 }
