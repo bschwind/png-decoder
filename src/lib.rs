@@ -634,7 +634,7 @@ fn defilter(
                 current_scanline[x]
             }
         },
-        FilterType::Up => current_scanline[x] + last_scanline[x],
+        FilterType::Up => current_scanline[x].wrapping_add(last_scanline[x]),
         FilterType::Average => {
             let raw_val = if let Some(idx) = x.checked_sub(bytes_per_pixel) {
                 current_scanline[idx]
@@ -652,7 +652,7 @@ fn defilter(
 
                 let predictor = paeth_predictor(left, above, upper_left);
 
-                current_scanline[x] + predictor
+                current_scanline[x].wrapping_add(predictor)
             } else {
                 let left = 0;
                 let above = last_scanline[x];
@@ -660,7 +660,7 @@ fn defilter(
 
                 let predictor = paeth_predictor(left, above, upper_left);
 
-                current_scanline[x] + predictor
+                current_scanline[x].wrapping_add(predictor)
             }
         },
     }
