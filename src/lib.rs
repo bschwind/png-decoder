@@ -22,14 +22,6 @@ pub enum BitDepth {
     Sixteen = 16,
 }
 
-// #[repr(u8)]
-// #[derive(Debug)]
-// pub enum ColorTypeCode {
-//     PaletteUsed = 1,
-//     ColorUsed = 2,
-//     AlphaChannelUsed = 4,
-// }
-
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, TryFromPrimitive)]
 pub enum ColorType {
@@ -145,7 +137,6 @@ impl<'a> ScanlineIterator<'a> {
         scanline: &'a [u8],
         extra_chunks: &'a AncillaryChunks<'a>,
     ) -> Self {
-        // TODO - Assert scanline.len() == bytes_per_pixel * image_width
         Self {
             image_width: image_width as usize,
             pixel_cursor: 0,
@@ -432,7 +423,7 @@ pub enum FilterMethod {
 }
 
 #[repr(u8)]
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Copy, Clone, Debug, TryFromPrimitive)]
 pub enum FilterType {
     None = 0,
     Sub = 1,
@@ -628,6 +619,54 @@ fn read_chunk(bytes: &[u8]) -> Result<Chunk, DecodeError> {
 }
 
 fn defilter(
+    filter_type: FilterType,
+    bytes_per_pixel: usize,
+    x: usize,
+    current_scanline: &[u8],
+    last_scanline: &[u8],
+) -> u8 {
+    match filter_type {
+        FilterType::None => current_scanline[x],
+        FilterType::Sub => {
+            if let Some(idx) = x.checked_sub(bytes_per_pixel) {
+                current_scanline[x].wrapping_add(current_scanline[idx])
+            } else {
+                current_scanline[x]
+            }
+        },
+        FilterType::Up => current_scanline[x] + last_scanline[x],
+        FilterType::Average => {
+            let raw_val = if let Some(idx) = x.checked_sub(bytes_per_pixel) {
+                current_scanline[idx]
+            } else {
+                0
+            };
+
+            (current_scanline[x] as u16 + ((raw_val as u16 + last_scanline[x] as u16) / 2)) as u8
+        },
+        FilterType::Paeth => {
+            if let Some(idx) = x.checked_sub(bytes_per_pixel) {
+                let left = current_scanline[idx];
+                let above = last_scanline[x];
+                let upper_left = last_scanline[idx];
+
+                let predictor = paeth_predictor(left, above, upper_left);
+
+                current_scanline[x] + predictor
+            } else {
+                let left = 0;
+                let above = last_scanline[x];
+                let upper_left = 0;
+
+                let predictor = paeth_predictor(left, above, upper_left);
+
+                current_scanline[x] + predictor
+            }
+        },
+    }
+}
+
+fn process_scanlines(
     header: &PngHeader,
     scanline_data: &mut [u8],
     output_rgba: &mut [u8],
@@ -657,49 +696,13 @@ fn defilter(
                     &mut scanline_data[cursor..(cursor + bytes_per_scanline as usize)];
 
                 for x in 0..(bytes_per_scanline as usize) {
-                    let unfiltered_byte = match filter_type {
-                        FilterType::None => current_scanline[x],
-                        FilterType::Sub => {
-                            if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
-                                current_scanline[x].wrapping_add(current_scanline[idx])
-                            } else {
-                                current_scanline[x]
-                            }
-                        },
-                        FilterType::Up => current_scanline[x] + last_scanline[x],
-                        FilterType::Average => {
-                            let raw_val = if let Some(idx) = x.checked_sub(bytes_per_pixel as usize)
-                            {
-                                current_scanline[idx]
-                            } else {
-                                0
-                            };
-
-                            (current_scanline[x] as u16
-                                + ((raw_val as u16 + last_scanline[x] as u16) / 2))
-                                as u8
-                        },
-                        FilterType::Paeth => {
-                            if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
-                                let left = current_scanline[idx];
-                                let above = last_scanline[x];
-                                let upper_left = last_scanline[idx];
-
-                                let predictor = paeth_predictor(left, above, upper_left);
-
-                                current_scanline[x] + predictor
-                            } else {
-                                let left = 0;
-                                let above = last_scanline[x];
-                                let upper_left = 0;
-
-                                let predictor = paeth_predictor(left, above, upper_left);
-
-                                current_scanline[x] + predictor
-                            }
-                        },
-                    };
-
+                    let unfiltered_byte = defilter(
+                        filter_type,
+                        bytes_per_pixel as usize,
+                        x,
+                        current_scanline,
+                        &last_scanline,
+                    );
                     current_scanline[x] = unfiltered_byte;
                 }
 
@@ -711,7 +714,6 @@ fn defilter(
                 );
 
                 for (idx, (r, g, b, a)) in scanline_iter.enumerate() {
-                    // Put rgba in output_rgba
                     let (output_x, output_y) = (idx, y);
 
                     let output_idx =
@@ -723,12 +725,10 @@ fn defilter(
                 }
 
                 last_scanline.copy_from_slice(current_scanline);
-
                 cursor += bytes_per_scanline as usize;
             }
         },
         InterlaceMethod::Adam7 => {
-            // let max_bytes_per_scanline = ((header.width * header.bit_depth as u32 * header.color_type.sample_multiplier()) + 7) / 8;
             let max_bytes_per_scanline = header.width * bytes_per_pixel;
             let mut last_scanline = vec![0u8; max_bytes_per_scanline as usize];
 
@@ -807,49 +807,13 @@ fn defilter(
                         &mut scanline_data[cursor..(cursor + bytes_per_scanline as usize)];
 
                     for x in 0..(bytes_per_scanline as usize) {
-                        let unfiltered_byte = match filter_type {
-                            FilterType::None => current_scanline[x],
-                            FilterType::Sub => {
-                                if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
-                                    current_scanline[x].wrapping_add(current_scanline[idx])
-                                } else {
-                                    current_scanline[x]
-                                }
-                            },
-                            FilterType::Up => current_scanline[x] + last_scanline[x],
-                            FilterType::Average => {
-                                let raw_val =
-                                    if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
-                                        current_scanline[idx]
-                                    } else {
-                                        0
-                                    };
-
-                                (current_scanline[x] as u16
-                                    + ((raw_val as u16 + last_scanline[x] as u16) / 2))
-                                    as u8
-                            },
-                            FilterType::Paeth => {
-                                if let Some(idx) = x.checked_sub(bytes_per_pixel as usize) {
-                                    let left = current_scanline[idx];
-                                    let above = last_scanline[x];
-                                    let upper_left = last_scanline[idx];
-
-                                    let predictor = paeth_predictor(left, above, upper_left);
-
-                                    current_scanline[x] + predictor
-                                } else {
-                                    let left = 0;
-                                    let above = last_scanline[x];
-                                    let upper_left = 0;
-
-                                    let predictor = paeth_predictor(left, above, upper_left);
-
-                                    current_scanline[x] + predictor
-                                }
-                            },
-                        };
-
+                        let unfiltered_byte = defilter(
+                            filter_type,
+                            bytes_per_pixel as usize,
+                            x,
+                            current_scanline,
+                            &last_scanline,
+                        );
                         current_scanline[x] = unfiltered_byte;
                     }
 
@@ -955,8 +919,13 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
     // For now, output data is always RGBA, 1 byte per channel.
     let mut output_rgba = vec![0u8; header.width as usize * header.height as usize * 4];
 
-    // Defilter bytes
-    defilter(&header, &mut scanline_data, &mut output_rgba, &ancillary_chunks, pixel_type)?;
+    process_scanlines(
+        &header,
+        &mut scanline_data,
+        &mut output_rgba,
+        &ancillary_chunks,
+        pixel_type,
+    )?;
 
     Ok((header, output_rgba))
 }
@@ -980,7 +949,7 @@ mod tests {
                     "png" => {
                         let png_bytes = std::fs::read(&path).unwrap();
 
-                        let (header, decoded) =
+                        let (_header, decoded) =
                             if path.to_string_lossy().starts_with("test_pngs/png_suite/x") {
                                 // TODO(bschwind) - Handle invalid checksums
                                 // assert!(decode(&png_bytes).is_err());
@@ -989,14 +958,16 @@ mod tests {
                                 decode(&png_bytes).unwrap()
                             };
 
-                        let image_buf: image::ImageBuffer<image::Rgba<u8>, _> =
-                            image::ImageBuffer::from_vec(
-                                header.width,
-                                header.height,
-                                decoded.clone(),
-                            )
-                            .unwrap();
-                        image_buf.save("output.png").unwrap();
+                        // Uncomment to inspect output.png for debugging.
+                        // let image_buf: image::ImageBuffer<image::Rgba<u8>, _> =
+                        //     image::ImageBuffer::from_vec(
+                        //         _header.width,
+                        //         _header.height,
+                        //         decoded.clone(),
+                        //     )
+                        //     .unwrap();
+
+                        // image_buf.save("output.png").unwrap();
 
                         let comparison_image = image::open(path).unwrap();
                         let comarison_rgba8 = comparison_image.to_rgba8();
