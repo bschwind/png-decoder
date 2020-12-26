@@ -1,5 +1,3 @@
-use png_decoder;
-
 fn main() {
     let image_bytes = include_bytes!("../test_pngs/paeth.png");
     let (header, image_data) = png_decoder::decode(image_bytes).unwrap();
