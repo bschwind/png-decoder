@@ -441,13 +441,13 @@ pub enum InterlaceMethod {
 
 #[derive(Debug)]
 pub struct PngHeader {
-    width: u32,
-    height: u32,
-    bit_depth: BitDepth,
-    color_type: ColorType,
-    compression_method: CompressionMethod,
-    filter_method: FilterMethod,
-    interlace_method: InterlaceMethod,
+    pub width: u32,
+    pub height: u32,
+    pub bit_depth: BitDepth,
+    pub color_type: ColorType,
+    pub compression_method: CompressionMethod,
+    pub filter_method: FilterMethod,
+    pub interlace_method: InterlaceMethod,
 }
 
 impl PngHeader {
@@ -520,19 +520,19 @@ pub enum ChunkType {
 }
 
 impl ChunkType {
-    fn from_bytes(bytes: &[u8; 4]) -> Result<Self, DecodeError> {
+    fn from_bytes(bytes: &[u8; 4]) -> Self {
         match bytes {
-            b"IHDR" => Ok(ChunkType::ImageHeader),
-            b"PLTE" => Ok(ChunkType::Palette),
-            b"tRNS" => Ok(ChunkType::Transparency),
-            b"bKGD" => Ok(ChunkType::Background),
-            b"sRGB" => Ok(ChunkType::Srgb),
-            b"IDAT" => Ok(ChunkType::ImageData),
-            b"IEND" => Ok(ChunkType::ImageEnd),
-            b"gAMA" => Ok(ChunkType::Gamma),
+            b"IHDR" => ChunkType::ImageHeader,
+            b"PLTE" => ChunkType::Palette,
+            b"tRNS" => ChunkType::Transparency,
+            b"bKGD" => ChunkType::Background,
+            b"sRGB" => ChunkType::Srgb,
+            b"IDAT" => ChunkType::ImageData,
+            b"IEND" => ChunkType::ImageEnd,
+            b"gAMA" => ChunkType::Gamma,
             unknown_chunk_type => {
                 // println!("chunk_type: {:?}", alloc::string::String::from_utf8(chunk_type.to_vec()));
-                Ok(ChunkType::Unknown(*unknown_chunk_type))
+                ChunkType::Unknown(*unknown_chunk_type)
             },
         }
     }
@@ -610,7 +610,7 @@ fn read_chunk(bytes: &[u8]) -> Result<Chunk, DecodeError> {
         return Err(DecodeError::MissingBytes);
     }
 
-    let chunk_type = ChunkType::from_bytes(&[bytes[0], bytes[1], bytes[2], bytes[3]])?;
+    let chunk_type = ChunkType::from_bytes(&[bytes[0], bytes[1], bytes[2], bytes[3]]);
 
     let crc_offset = 4 + length as usize;
     let crc = read_u32(bytes, crc_offset);
