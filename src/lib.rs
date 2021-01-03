@@ -457,6 +457,10 @@ impl PngHeader {
             return Err(DecodeError::InvalidChunkType);
         }
 
+        if chunk.data.len() < 13 {
+            return Err(DecodeError::MissingBytes);
+        }
+
         let width = read_u32(chunk.data, 0);
         let height = read_u32(chunk.data, 4);
         let bit_depth = chunk.data[8];
