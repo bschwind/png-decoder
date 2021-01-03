@@ -36,4 +36,15 @@ $ cargo clippy
 
 ## Code Fuzzing
 
-TODO
+Fuzzing requires a nightly toolchain. Fuzzing for this project is currently confirmed to work with:
+
+```
++nightly-2020-10-07
+```
+
+## Running
+
+```
+cargo install cargo-fuzz
+cargo +nightly-2020-10-07 fuzz run png_decoder_fuzzer
+```
