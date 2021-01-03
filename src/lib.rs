@@ -7,6 +7,7 @@ extern crate std;
 
 use alloc::vec::Vec;
 use core::convert::TryFrom;
+use crc32fast::Hasher;
 use miniz_oxide::inflate::TINFLStatus;
 use num_enum::TryFromPrimitive;
 
@@ -489,6 +490,7 @@ pub enum DecodeError {
     InvalidChunk,
     Decompress(TINFLStatus),
 
+    IncorrectChunkCrc,
     InvalidBitDepth,
     InvalidColorType,
     InvalidColorTypeBitDepthCombination,
@@ -615,7 +617,18 @@ fn read_chunk(bytes: &[u8]) -> Result<Chunk, DecodeError> {
     let crc_offset = 4 + length as usize;
     let crc = read_u32(bytes, crc_offset);
 
-    Ok(Chunk { length, chunk_type, data: &bytes[4..(4 + length as usize)], crc })
+    // Offset by 4 to not include the chunk type.
+    let data_for_crc = &bytes[..(4 + length as usize)];
+
+    let mut hasher = Hasher::new();
+    hasher.reset();
+    hasher.update(data_for_crc);
+
+    if crc != hasher.finalize() {
+        return Err(DecodeError::IncorrectChunkCrc);
+    }
+
+    Ok(Chunk { length, chunk_type, data: &data_for_crc[4..], crc })
 }
 
 fn defilter(
@@ -881,7 +894,7 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
     }
 
     if &bytes[0..PNG_MAGIC_BYTES.len()] != PNG_MAGIC_BYTES {
-        return Err(DecodeError::MissingBytes);
+        return Err(DecodeError::InvalidMagicBytes);
     }
 
     let bytes = &bytes[PNG_MAGIC_BYTES.len()..];
@@ -951,8 +964,7 @@ mod tests {
 
                         let (_header, decoded) =
                             if path.to_string_lossy().starts_with("test_pngs/png_suite/x") {
-                                // TODO(bschwind) - Handle invalid checksums
-                                // assert!(decode(&png_bytes).is_err());
+                                assert!(decode(&png_bytes).is_err());
                                 continue;
                             } else {
                                 decode(&png_bytes).unwrap()

@@ -5,6 +5,7 @@ authors = ["Brian Schwind <brianmschwind@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+crc32fast = "1"
 num_enum = { version = "0.5", features = [] }
 miniz_oxide = { version = "0.4.3", features = [] }
 
