@@ -12,6 +12,10 @@ keywords = ["png", "image", "decoder"]
 categories = ["multimedia::image"]
 license-file = "LICENSE"
 
+exclude = [
+    "test_pngs/*",
+]
+
 [dependencies]
 crc32fast = "1"
 num_enum = { version = "0.5", features = [] }
