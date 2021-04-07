@@ -962,44 +962,41 @@ mod tests {
             let path = entry.path();
 
             if let Some(extension) = path.extension().and_then(|os_str| os_str.to_str()) {
-                match extension.to_ascii_lowercase().as_str() {
-                    "png" => {
-                        let png_bytes = std::fs::read(&path).unwrap();
+                if extension.to_ascii_lowercase().as_str() == "png" {
+                    let png_bytes = std::fs::read(&path).unwrap();
 
-                        let (_header, decoded) =
-                            if path.to_string_lossy().starts_with("test_pngs/png_suite/x") {
-                                assert!(decode(&png_bytes).is_err());
-                                continue;
-                            } else {
-                                decode(&png_bytes).unwrap()
-                            };
+                    let (_header, decoded) =
+                        if path.to_string_lossy().starts_with("test_pngs/png_suite/x") {
+                            assert!(decode(&png_bytes).is_err());
+                            continue;
+                        } else {
+                            decode(&png_bytes).unwrap()
+                        };
 
-                        // Uncomment to inspect output.png for debugging.
-                        // let image_buf: image::ImageBuffer<image::Rgba<u8>, _> =
-                        //     image::ImageBuffer::from_vec(
-                        //         _header.width,
-                        //         _header.height,
-                        //         decoded.clone(),
-                        //     )
-                        //     .unwrap();
+                    // Uncomment to inspect output.png for debugging.
+                    // let image_buf: image::ImageBuffer<image::Rgba<u8>, _> =
+                    //     image::ImageBuffer::from_vec(
+                    //         _header.width,
+                    //         _header.height,
+                    //         decoded.clone(),
+                    //     )
+                    //     .unwrap();
 
-                        // image_buf.save("output.png").unwrap();
+                    // image_buf.save("output.png").unwrap();
 
-                        let comparison_image = image::open(path).unwrap();
-                        let comarison_rgba8 = comparison_image.to_rgba8();
+                    let comparison_image = image::open(path).unwrap();
+                    let comarison_rgba8 = comparison_image.to_rgba8();
 
-                        let comparison_bytes = comarison_rgba8.as_bytes();
-                        assert_eq!(decoded.len(), comparison_bytes.len());
+                    let comparison_bytes = comarison_rgba8.as_bytes();
+                    assert_eq!(decoded.len(), comparison_bytes.len());
 
-                        for (idx, (test_byte, comparison_byte)) in
-                            decoded.iter().zip(comparison_bytes.iter()).enumerate()
-                        {
-                            let start_idx = idx.saturating_sub(16);
-                            let end_idx = (idx + 16).min(decoded.len());
-                            assert_eq!(test_byte, comparison_byte, "incorrect byte at index {}, decoded slice: {:?}, comparison_slice: {:?}", idx, &decoded[start_idx..end_idx], &comparison_bytes[start_idx..end_idx]);
-                        }
-                    },
-                    _ => {},
+                    for (idx, (test_byte, comparison_byte)) in
+                        decoded.iter().zip(comparison_bytes.iter()).enumerate()
+                    {
+                        let start_idx = idx.saturating_sub(16);
+                        let end_idx = (idx + 16).min(decoded.len());
+                        assert_eq!(test_byte, comparison_byte, "incorrect byte at index {}, decoded slice: {:?}, comparison_slice: {:?}", idx, &decoded[start_idx..end_idx], &comparison_bytes[start_idx..end_idx]);
+                    }
                 }
             }
         }
