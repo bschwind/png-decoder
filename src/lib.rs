@@ -24,7 +24,7 @@ pub enum BitDepth {
 }
 
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, TryFromPrimitive)]
 pub enum ColorType {
     Grayscale = 0,
     Rgb = 2,
@@ -412,19 +412,19 @@ impl<'a> Iterator for ScanlineIterator<'a> {
 }
 
 #[repr(u8)]
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, TryFromPrimitive)]
 pub enum CompressionMethod {
     Deflate = 0,
 }
 
 #[repr(u8)]
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, TryFromPrimitive)]
 pub enum FilterMethod {
     Adaptive = 0,
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone, Debug, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, TryFromPrimitive)]
 pub enum FilterType {
     None = 0,
     Sub = 1,
@@ -434,13 +434,13 @@ pub enum FilterType {
 }
 
 #[repr(u8)]
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, TryFromPrimitive)]
 pub enum InterlaceMethod {
     None = 0,
     Adam7 = 1,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PngHeader {
     pub width: u32,
     pub height: u32,
@@ -484,7 +484,7 @@ impl PngHeader {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DecodeError {
     InvalidMagicBytes,
     MissingBytes,
@@ -504,7 +504,7 @@ pub enum DecodeError {
     InvalidInterlaceMethod,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Color {
     r: u8,
     g: u8,
@@ -512,7 +512,7 @@ pub struct Color {
     a: u8,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ChunkType {
     ImageHeader,
     Palette,
