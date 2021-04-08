@@ -965,13 +965,17 @@ mod tests {
                 if extension.to_ascii_lowercase().as_str() == "png" {
                     let png_bytes = std::fs::read(&path).unwrap();
 
-                    let (_header, decoded) =
-                        if path.to_string_lossy().starts_with("test_pngs/png_suite/x") {
-                            assert!(decode(&png_bytes).is_err());
-                            continue;
-                        } else {
-                            decode(&png_bytes).unwrap()
-                        };
+                    let (_header, decoded) = if path
+                        .file_stem()
+                        .expect("expected png path to be a file")
+                        .to_string_lossy()
+                        .starts_with('x')
+                    {
+                        assert!(decode(&png_bytes).is_err());
+                        continue;
+                    } else {
+                        decode(&png_bytes).unwrap()
+                    };
 
                     // Uncomment to inspect output.png for debugging.
                     // let image_buf: image::ImageBuffer<image::Rgba<u8>, _> =
