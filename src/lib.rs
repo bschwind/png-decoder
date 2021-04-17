@@ -734,7 +734,10 @@ fn process_scanlines(
                     let (output_x, output_y) = (idx, y);
 
                     let output_idx =
-                        (output_y as usize * header.width as usize * 4) + (output_x * 4);
+                        (output_y as u64 * header.width as u64 * 4) + (output_x as u64 * 4);
+                    let output_idx: usize =
+                        output_idx.try_into().map_err(|_| DecodeError::IntegerOverflow)?;
+
                     output_rgba[output_idx] = r;
                     output_rgba[output_idx + 1] = g;
                     output_rgba[output_idx + 2] = b;
@@ -857,7 +860,10 @@ fn process_scanlines(
                         };
 
                         let output_idx =
-                            (output_y as usize * header.width as usize * 4) + (output_x * 4);
+                            (output_y as u64 * header.width as u64 * 4) + (output_x as u64 * 4);
+                        let output_idx: usize =
+                            output_idx.try_into().map_err(|_| DecodeError::IntegerOverflow)?;
+
                         output_rgba[output_idx] = r;
                         output_rgba[output_idx + 1] = g;
                         output_rgba[output_idx + 2] = b;
