@@ -550,7 +550,6 @@ impl ChunkType {
 
 #[derive(Debug)]
 struct Chunk<'a> {
-    length: u32,
     chunk_type: ChunkType,
     data: &'a [u8],
     crc: u32,
@@ -559,7 +558,7 @@ struct Chunk<'a> {
 impl<'a> Chunk<'a> {
     fn byte_size(&self) -> usize {
         // length bytes + chunk type bytes + data bytes + crc bytes
-        4 + 4 + self.length as usize + 4
+        4 + 4 + self.data.len() as usize + 4
     }
 }
 
@@ -636,7 +635,7 @@ fn read_chunk(bytes: &[u8]) -> Result<Chunk, DecodeError> {
         return Err(DecodeError::IncorrectChunkCrc);
     }
 
-    Ok(Chunk { length: length as u32, chunk_type, data: &data_for_crc[4..], crc })
+    Ok(Chunk { chunk_type, data: &data_for_crc[4..], crc })
 }
 
 fn defilter(
