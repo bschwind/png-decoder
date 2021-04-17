@@ -106,7 +106,7 @@ impl PixelType {
     }
 }
 
-#[inline]
+#[inline(always)]
 fn u16_to_u8(val: u16) -> u8 {
     (val >> 8) as u8
 }
