@@ -670,7 +670,7 @@ fn defilter(
                 let above = last_scanline[x];
                 let upper_left = last_scanline[idx];
 
-                let predictor = paeth_predictor(left, above, upper_left);
+                let predictor = paeth_predictor(left as i16, above as i16, upper_left as i16);
 
                 current_scanline[x].wrapping_add(predictor)
             } else {
@@ -678,7 +678,7 @@ fn defilter(
                 let above = last_scanline[x];
                 let upper_left = 0;
 
-                let predictor = paeth_predictor(left, above, upper_left);
+                let predictor = paeth_predictor(left as i16, above as i16, upper_left as i16);
 
                 current_scanline[x].wrapping_add(predictor)
             }
@@ -875,22 +875,22 @@ fn process_scanlines(
     Ok(())
 }
 
-fn paeth_predictor(a: u8, b: u8, c: u8) -> u8 {
+fn paeth_predictor(a: i16, b: i16, c: i16) -> u8 {
     // TODO(bschwind) - Accept i16 or convert once and store in a temp.
     // a = left pixel
     // b = above pixel
     // c = upper left
-    let p = a as i16 + b as i16 - c as i16;
-    let pa = (p as i16 - a as i16).abs();
-    let pb = (p as i16 - b as i16).abs();
-    let pc = (p as i16 - c as i16).abs();
+    let p = a + b - c;
+    let pa = (p - a).abs();
+    let pb = (p - b).abs();
+    let pc = (p - c).abs();
 
     if pa <= pb && pa <= pc {
-        a
+        a as u8
     } else if pb <= pc {
-        b
+        b as u8
     } else {
-        c
+        c as u8
     }
 }
 
