@@ -659,12 +659,12 @@ fn defilter(
             }
         },
         FilterType::Average => {
-            for x in 0..(bytes_per_scanline) {
-                let raw_val = if let Some(idx) = x.checked_sub(bytes_per_pixel) {
-                    current_scanline[idx]
-                } else {
-                    0
-                };
+            for x in 0..(bytes_per_pixel) {
+                current_scanline[x] =
+                    (current_scanline[x] as u16 + ((last_scanline[x] as u16) / 2)) as u8;
+            }
+            for x in bytes_per_pixel..(bytes_per_scanline) {
+                let raw_val = current_scanline[x - bytes_per_pixel];
 
                 current_scanline[x] = (current_scanline[x] as u16
                     + ((raw_val as u16 + last_scanline[x] as u16) / 2))
@@ -719,6 +719,9 @@ fn process_scanlines(
 
             let mut last_scanline = vec![0u8; bytes_per_scanline];
 
+            let mut total_defilter = std::time::Duration::from_secs(0);
+            let mut total_scanline = std::time::Duration::from_secs(0);
+
             for y in 0..header.height {
                 let filter_type = FilterType::try_from(scanline_data[cursor])
                     .map_err(|_| DecodeError::InvalidFilterType)?;
@@ -726,6 +729,7 @@ fn process_scanlines(
 
                 let current_scanline = &mut scanline_data[cursor..(cursor + bytes_per_scanline)];
 
+                let now = std::time::Instant::now();
                 defilter(
                     filter_type,
                     bytes_per_pixel,
@@ -734,6 +738,9 @@ fn process_scanlines(
                     &last_scanline,
                 );
 
+                total_defilter += now.elapsed();
+
+                let now = std::time::Instant::now();
                 let scanline_iter = ScanlineIterator::new(
                     header.width,
                     pixel_type,
@@ -755,9 +762,14 @@ fn process_scanlines(
                     output_rgba[output_idx + 3] = a;
                 }
 
+                total_scanline += now.elapsed();
+
                 last_scanline.copy_from_slice(current_scanline);
                 cursor += bytes_per_scanline;
             }
+
+            println!("total_defilter took {:?}", total_defilter);
+            println!("total_scanline took {:?}", total_scanline);
         },
         InterlaceMethod::Adam7 => {
             let max_bytes_per_scanline = header.width as usize * bytes_per_pixel;
@@ -930,6 +942,7 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
     let pixel_type = PixelType::new(header.color_type, header.bit_depth)?;
     let mut ancillary_chunks = AncillaryChunks::default();
 
+    let now = std::time::Instant::now();
     while !bytes.is_empty() {
         let chunk = read_chunk(bytes)?;
 
@@ -946,12 +959,18 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
         bytes = &bytes[chunk.byte_size()..];
     }
 
+    println!("Chunk reading took {:?}", now.elapsed());
+
+    let now = std::time::Instant::now();
     let mut scanline_data = miniz_oxide::inflate::decompress_to_vec_zlib(&compressed_data)
         .map_err(DecodeError::Decompress)?;
+
+    println!("Decompress took {:?}", now.elapsed());
 
     // For now, output data is always RGBA, 1 byte per channel.
     let mut output_rgba = vec![0u8; header.width as usize * header.height as usize * 4];
 
+    let now = std::time::Instant::now();
     process_scanlines(
         &header,
         &mut scanline_data,
@@ -959,6 +978,7 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
         &ancillary_chunks,
         pixel_type,
     )?;
+    println!("process_scanlines took {:?}", now.elapsed());
 
     Ok((header, output_rgba))
 }
@@ -1020,5 +1040,13 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn hd_decode_test() {
+        let png_bytes = include_bytes!("../test_pngs/skyline.png");
+        let now = std::time::Instant::now();
+        let (_header, decoded) = decode(png_bytes).unwrap();
+        println!("Took {:?}", now.elapsed());
     }
 }
