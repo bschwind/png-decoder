@@ -648,10 +648,9 @@ fn defilter(
     match filter_type {
         FilterType::None => {},
         FilterType::Sub => {
-            for x in 0..(bytes_per_scanline) {
-                if let Some(idx) = x.checked_sub(bytes_per_pixel) {
-                    current_scanline[x] = current_scanline[x].wrapping_add(current_scanline[idx]);
-                }
+            for x in bytes_per_pixel..(bytes_per_scanline) {
+                let idx = x - bytes_per_pixel;
+                current_scanline[x] = current_scanline[x].wrapping_add(current_scanline[idx]);
             }
         },
         FilterType::Up => {
