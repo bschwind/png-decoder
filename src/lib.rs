@@ -644,8 +644,6 @@ fn defilter<const BPP: usize>(
     current_scanline: &mut [u8],
     last_scanline: &[u8],
 ) {
-    let bytes_per_scanline = current_scanline.len();
-
     match filter_type {
         FilterType::None => {},
         FilterType::Sub => {
@@ -653,7 +651,7 @@ fn defilter<const BPP: usize>(
             let mut prev_chunk = chunk_iter.next().unwrap();
 
             for current_chunk in &mut chunk_iter {
-                for (current_byte, prev_byte) in current_chunk.iter_mut().zip(prev_chunk.iter()) {
+                for (current_byte, prev_byte) in current_chunk.iter_mut().zip(prev_chunk) {
                     *current_byte = current_byte.wrapping_add(*prev_byte);
                 }
 
@@ -671,12 +669,21 @@ fn defilter<const BPP: usize>(
                     (current_scanline[x] as u16 + ((last_scanline[x] as u16) / 2)) as u8;
             }
 
-            for x in BPP..(bytes_per_scanline) {
-                let raw_val = current_scanline[x - BPP];
+            let mut chunk_iter = current_scanline.chunks_exact_mut(BPP);
+            let mut left_chunk = chunk_iter.next().unwrap();
 
-                current_scanline[x] = (current_scanline[x] as u16
-                    + ((raw_val as u16 + last_scanline[x] as u16) / 2))
-                    as u8;
+            let upper_iter = last_scanline[BPP..].chunks_exact(BPP);
+
+            for (current_chunk, upper_chunk) in (&mut chunk_iter).zip(upper_iter) {
+                for ((current_byte, left_byte), upper_byte) in
+                    current_chunk.iter_mut().zip(left_chunk).zip(upper_chunk)
+                {
+                    *current_byte = (*current_byte as u16
+                        + ((*left_byte as u16 + *upper_byte as u16) / 2))
+                        as u8;
+                }
+
+                left_chunk = current_chunk;
             }
         },
         FilterType::Paeth => {
@@ -685,15 +692,27 @@ fn defilter<const BPP: usize>(
                 current_scanline[x] = current_scanline[x].wrapping_add(predictor);
             }
 
-            for x in BPP..(bytes_per_scanline) {
-                let idx = x - BPP;
-                let left = current_scanline[idx];
-                let above = last_scanline[x];
-                let upper_left = last_scanline[idx];
+            let mut chunk_iter = current_scanline.chunks_exact_mut(BPP);
+            let mut left_chunk = chunk_iter.next().unwrap();
 
-                let predictor = paeth_predictor(left as i16, above as i16, upper_left as i16);
+            let upper_left_iter = last_scanline.chunks_exact(BPP);
+            let upper_iter = last_scanline[BPP..].chunks_exact(BPP);
 
-                current_scanline[x] = current_scanline[x].wrapping_add(predictor);
+            for ((current_chunk, upper_left_chunk), upper_chunk) in
+                (&mut chunk_iter).zip(upper_left_iter).zip(upper_iter)
+            {
+                for (((current_byte, left_byte), upper_left_byte), upper_byte) in
+                    current_chunk.iter_mut().zip(left_chunk).zip(upper_left_chunk).zip(upper_chunk)
+                {
+                    let predictor = paeth_predictor(
+                        *left_byte as i16,
+                        *upper_byte as i16,
+                        *upper_left_byte as i16,
+                    );
+                    *current_byte = current_byte.wrapping_add(predictor);
+                }
+
+                left_chunk = current_chunk;
             }
         },
     }
