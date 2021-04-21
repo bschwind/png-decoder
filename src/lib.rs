@@ -641,21 +641,28 @@ fn read_chunk(bytes: &[u8]) -> Result<Chunk, DecodeError> {
 fn defilter(
     filter_type: FilterType,
     bytes_per_pixel: usize,
-    bytes_per_scanline: usize,
     current_scanline: &mut [u8],
     last_scanline: &[u8],
 ) {
+    let bytes_per_scanline = current_scanline.len();
+
     match filter_type {
         FilterType::None => {},
         FilterType::Sub => {
-            for x in bytes_per_pixel..(bytes_per_scanline) {
-                let idx = x - bytes_per_pixel;
-                current_scanline[x] = current_scanline[x].wrapping_add(current_scanline[idx]);
+            let mut chunk_iter = current_scanline.chunks_exact_mut(bytes_per_pixel);
+            let mut prev_chunk = chunk_iter.next().unwrap();
+
+            for current_chunk in &mut chunk_iter {
+                for (current_byte, prev_byte) in current_chunk.iter_mut().zip(prev_chunk.iter()) {
+                    *current_byte = current_byte.wrapping_add(*prev_byte);
+                }
+
+                prev_chunk = current_chunk;
             }
         },
         FilterType::Up => {
-            for x in 0..(bytes_per_scanline) {
-                current_scanline[x] = current_scanline[x].wrapping_add(last_scanline[x]);
+            for (current, above) in (current_scanline.iter_mut()).zip(last_scanline) {
+                *current = current.wrapping_add(*above);
             }
         },
         FilterType::Average => {
@@ -663,6 +670,7 @@ fn defilter(
                 current_scanline[x] =
                     (current_scanline[x] as u16 + ((last_scanline[x] as u16) / 2)) as u8;
             }
+
             for x in bytes_per_pixel..(bytes_per_scanline) {
                 let raw_val = current_scanline[x - bytes_per_pixel];
 
@@ -672,24 +680,20 @@ fn defilter(
             }
         },
         FilterType::Paeth => {
-            for x in 0..(bytes_per_scanline) {
-                if let Some(idx) = x.checked_sub(bytes_per_pixel) {
-                    let left = current_scanline[idx];
-                    let above = last_scanline[x];
-                    let upper_left = last_scanline[idx];
+            for x in 0..(bytes_per_pixel) {
+                let predictor = paeth_predictor(0, last_scanline[x] as i16, 0);
+                current_scanline[x] = current_scanline[x].wrapping_add(predictor);
+            }
 
-                    let predictor = paeth_predictor(left as i16, above as i16, upper_left as i16);
+            for x in bytes_per_pixel..(bytes_per_scanline) {
+                let idx = x - bytes_per_pixel;
+                let left = current_scanline[idx];
+                let above = last_scanline[x];
+                let upper_left = last_scanline[idx];
 
-                    current_scanline[x] = current_scanline[x].wrapping_add(predictor);
-                } else {
-                    let left = 0;
-                    let above = last_scanline[x];
-                    let upper_left = 0;
+                let predictor = paeth_predictor(left as i16, above as i16, upper_left as i16);
 
-                    let predictor = paeth_predictor(left as i16, above as i16, upper_left as i16);
-
-                    current_scanline[x] = current_scanline[x].wrapping_add(predictor);
-                }
+                current_scanline[x] = current_scanline[x].wrapping_add(predictor);
             }
         },
     }
@@ -730,13 +734,7 @@ fn process_scanlines(
                 let current_scanline = &mut scanline_data[cursor..(cursor + bytes_per_scanline)];
 
                 let now = std::time::Instant::now();
-                defilter(
-                    filter_type,
-                    bytes_per_pixel,
-                    bytes_per_scanline,
-                    current_scanline,
-                    &last_scanline,
-                );
+                defilter(filter_type, bytes_per_pixel, current_scanline, &last_scanline);
 
                 total_defilter += now.elapsed();
 
@@ -851,13 +849,7 @@ fn process_scanlines(
                     let current_scanline =
                         &mut scanline_data[cursor..(cursor + bytes_per_scanline)];
 
-                    defilter(
-                        filter_type,
-                        bytes_per_pixel,
-                        bytes_per_scanline,
-                        current_scanline,
-                        &last_scanline,
-                    );
+                    defilter(filter_type, bytes_per_pixel, current_scanline, &last_scanline);
 
                     let scanline_iter = ScanlineIterator::new(
                         pass_width,
