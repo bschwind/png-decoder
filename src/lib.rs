@@ -638,9 +638,9 @@ fn read_chunk(bytes: &[u8]) -> Result<Chunk, DecodeError> {
     Ok(Chunk { chunk_type, data: &data_for_crc[4..], crc })
 }
 
-fn defilter(
+// BPP = Bytes Per Pixel
+fn defilter<const BPP: usize>(
     filter_type: FilterType,
-    bytes_per_pixel: usize,
     current_scanline: &mut [u8],
     last_scanline: &[u8],
 ) {
@@ -649,7 +649,7 @@ fn defilter(
     match filter_type {
         FilterType::None => {},
         FilterType::Sub => {
-            let mut chunk_iter = current_scanline.chunks_exact_mut(bytes_per_pixel);
+            let mut chunk_iter = current_scanline.chunks_exact_mut(BPP);
             let mut prev_chunk = chunk_iter.next().unwrap();
 
             for current_chunk in &mut chunk_iter {
@@ -666,13 +666,13 @@ fn defilter(
             }
         },
         FilterType::Average => {
-            for x in 0..(bytes_per_pixel) {
+            for x in 0..(BPP) {
                 current_scanline[x] =
                     (current_scanline[x] as u16 + ((last_scanline[x] as u16) / 2)) as u8;
             }
 
-            for x in bytes_per_pixel..(bytes_per_scanline) {
-                let raw_val = current_scanline[x - bytes_per_pixel];
+            for x in BPP..(bytes_per_scanline) {
+                let raw_val = current_scanline[x - BPP];
 
                 current_scanline[x] = (current_scanline[x] as u16
                     + ((raw_val as u16 + last_scanline[x] as u16) / 2))
@@ -680,13 +680,13 @@ fn defilter(
             }
         },
         FilterType::Paeth => {
-            for x in 0..(bytes_per_pixel) {
+            for x in 0..(BPP) {
                 let predictor = paeth_predictor(0, last_scanline[x] as i16, 0);
                 current_scanline[x] = current_scanline[x].wrapping_add(predictor);
             }
 
-            for x in bytes_per_pixel..(bytes_per_scanline) {
-                let idx = x - bytes_per_pixel;
+            for x in BPP..(bytes_per_scanline) {
+                let idx = x - BPP;
                 let left = current_scanline[idx];
                 let above = last_scanline[x];
                 let upper_left = last_scanline[idx];
@@ -734,7 +734,16 @@ fn process_scanlines(
                 let current_scanline = &mut scanline_data[cursor..(cursor + bytes_per_scanline)];
 
                 let now = std::time::Instant::now();
-                defilter(filter_type, bytes_per_pixel, current_scanline, &last_scanline);
+
+                match bytes_per_pixel {
+                    1 => defilter::<1>(filter_type, current_scanline, &last_scanline),
+                    2 => defilter::<2>(filter_type, current_scanline, &last_scanline),
+                    3 => defilter::<3>(filter_type, current_scanline, &last_scanline),
+                    4 => defilter::<4>(filter_type, current_scanline, &last_scanline),
+                    6 => defilter::<6>(filter_type, current_scanline, &last_scanline),
+                    8 => defilter::<8>(filter_type, current_scanline, &last_scanline),
+                    _ => {},
+                }
 
                 total_defilter += now.elapsed();
 
@@ -849,7 +858,15 @@ fn process_scanlines(
                     let current_scanline =
                         &mut scanline_data[cursor..(cursor + bytes_per_scanline)];
 
-                    defilter(filter_type, bytes_per_pixel, current_scanline, &last_scanline);
+                    match bytes_per_pixel {
+                        1 => defilter::<1>(filter_type, current_scanline, &last_scanline),
+                        2 => defilter::<2>(filter_type, current_scanline, &last_scanline),
+                        3 => defilter::<3>(filter_type, current_scanline, &last_scanline),
+                        4 => defilter::<4>(filter_type, current_scanline, &last_scanline),
+                        6 => defilter::<6>(filter_type, current_scanline, &last_scanline),
+                        8 => defilter::<8>(filter_type, current_scanline, &last_scanline),
+                        _ => {},
+                    }
 
                     let scanline_iter = ScanlineIterator::new(
                         pass_width,
