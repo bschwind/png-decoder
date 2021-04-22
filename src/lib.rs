@@ -939,13 +939,16 @@ fn paeth_predictor(a: i16, b: i16, c: i16) -> u8 {
     let pb = (p - b).abs();
     let pc = (p - c).abs();
 
-    if pa <= pb && pa <= pc {
-        a as u8
-    } else if pb <= pc {
-        b as u8
-    } else {
-        c as u8
-    }
+    let first = pa <= pb && pa <= pc;
+    let first_bitmask = first as u8 * 255u8;
+
+    let second = !first && pb <= pc;
+    let second_bitmask = second as u8 * 255u8;
+
+    let third = !first && !second;
+    let third_bitmask = third as u8 * 255u8;
+
+    (first_bitmask & a as u8) | (second_bitmask & b as u8) | (third_bitmask & c as u8)
 }
 
 pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
