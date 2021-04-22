@@ -665,8 +665,7 @@ fn defilter<const BPP: usize>(
         },
         FilterType::Average => {
             for x in 0..(BPP) {
-                current_scanline[x] =
-                    (current_scanline[x] as u16 + ((last_scanline[x] as u16) / 2)) as u8;
+                current_scanline[x] = current_scanline[x].wrapping_add((last_scanline[x]) / 2);
             }
 
             let mut chunk_iter = current_scanline.chunks_exact_mut(BPP);
@@ -678,9 +677,8 @@ fn defilter<const BPP: usize>(
                 for ((current_byte, left_byte), upper_byte) in
                     current_chunk.iter_mut().zip(left_chunk).zip(upper_chunk)
                 {
-                    *current_byte = (*current_byte as u16
-                        + ((*left_byte as u16 + *upper_byte as u16) / 2))
-                        as u8;
+                    *current_byte = current_byte
+                        .wrapping_add(((*left_byte as u16 + *upper_byte as u16) / 2) as u8);
                 }
 
                 left_chunk = current_chunk;
