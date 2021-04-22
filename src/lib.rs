@@ -1074,7 +1074,7 @@ mod tests {
     fn hd_decode_test() {
         let png_bytes = include_bytes!("../test_pngs/skyline.png");
         let now = std::time::Instant::now();
-        let (_header, decoded) = decode(png_bytes).unwrap();
+        let (_header, _decoded) = decode(png_bytes).unwrap();
         println!("Took {:?}", now.elapsed());
     }
 }
