@@ -674,11 +674,12 @@ fn defilter<const BPP: usize>(
             let upper_iter = last_scanline[BPP..].chunks_exact(BPP);
 
             for (current_chunk, upper_chunk) in (&mut chunk_iter).zip(upper_iter) {
-                for ((current_byte, left_byte), upper_byte) in
-                    current_chunk.iter_mut().zip(left_chunk).zip(upper_chunk)
-                {
-                    *current_byte = current_byte
-                        .wrapping_add(((*left_byte as u16 + *upper_byte as u16) / 2) as u8);
+                for i in 0..BPP {
+                    let left_byte = left_chunk[i];
+                    let upper_byte = upper_chunk[i];
+
+                    current_chunk[i] = current_chunk[i]
+                        .wrapping_add(((left_byte as u16 + upper_byte as u16) / 2) as u8);
                 }
 
                 left_chunk = current_chunk;
@@ -699,15 +700,18 @@ fn defilter<const BPP: usize>(
             for ((current_chunk, upper_left_chunk), upper_chunk) in
                 (&mut chunk_iter).zip(upper_left_iter).zip(upper_iter)
             {
-                for (((current_byte, left_byte), upper_left_byte), upper_byte) in
-                    current_chunk.iter_mut().zip(left_chunk).zip(upper_left_chunk).zip(upper_chunk)
-                {
+                for i in 0..BPP {
+                    let left_byte = left_chunk[i];
+                    let upper_left_byte = upper_left_chunk[i];
+                    let upper_byte = upper_chunk[i];
+
                     let predictor = paeth_predictor(
-                        *left_byte as i16,
-                        *upper_byte as i16,
-                        *upper_left_byte as i16,
+                        left_byte as i16,
+                        upper_byte as i16,
+                        upper_left_byte as i16,
                     );
-                    *current_byte = current_byte.wrapping_add(predictor);
+
+                    current_chunk[i] = current_chunk[i].wrapping_add(predictor);
                 }
 
                 left_chunk = current_chunk;
