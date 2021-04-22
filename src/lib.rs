@@ -716,14 +716,36 @@ fn defilter<const BPP: usize>(
     }
 }
 
+#[inline(always)]
+fn paeth_predictor(a: i16, b: i16, c: i16) -> u8 {
+    // TODO(bschwind) - Accept i16 or convert once and store in a temp.
+    // a = left pixel
+    // b = above pixel
+    // c = upper left
+    let p = a + b - c;
+    let pa = (p - a).abs();
+    let pb = (p - b).abs();
+    let pc = (p - c).abs();
+
+    let first = pa <= pb && pa <= pc;
+    let first_bitmask = first as u8 * 255u8;
+
+    let second = !first && pb <= pc;
+    let second_bitmask = second as u8 * 255u8;
+
+    let third = !first && !second;
+    let third_bitmask = third as u8 * 255u8;
+
+    (first_bitmask & a as u8) | (second_bitmask & b as u8) | (third_bitmask & c as u8)
+}
+
 fn process_scanlines(
     header: &PngHeader,
-    scanline_data: &mut [u8],
+    mut scanline_data: &mut [u8],
     output_rgba: &mut [u8],
     ancillary_chunks: &AncillaryChunks,
     pixel_type: PixelType,
 ) -> Result<(), DecodeError> {
-    let mut cursor = 0;
     let bytes_per_pixel: usize =
         ((header.bit_depth as usize * header.color_type.sample_multiplier()) + 7) / 8;
 
@@ -738,17 +760,18 @@ fn process_scanlines(
             let bytes_per_scanline: usize =
                 bytes_per_scanline.try_into().map_err(|_| DecodeError::IntegerOverflow)?;
 
-            let mut last_scanline = vec![0u8; bytes_per_scanline];
+            let zero_scanline = vec![0u8; bytes_per_scanline];
+            let mut last_scanline: &[u8] = &zero_scanline;
 
             let mut total_defilter = std::time::Duration::from_secs(0);
             let mut total_scanline = std::time::Duration::from_secs(0);
 
             for y in 0..header.height {
-                let filter_type = FilterType::try_from(scanline_data[cursor])
+                let filter_type = FilterType::try_from(scanline_data[0])
                     .map_err(|_| DecodeError::InvalidFilterType)?;
-                cursor += 1;
 
-                let current_scanline = &mut scanline_data[cursor..(cursor + bytes_per_scanline)];
+                let (current_scanline, scanline_data_tail) =
+                    scanline_data[1..].split_at_mut(bytes_per_scanline);
 
                 let now = std::time::Instant::now();
 
@@ -788,8 +811,8 @@ fn process_scanlines(
 
                 total_scanline += now.elapsed();
 
-                last_scanline.copy_from_slice(current_scanline);
-                cursor += bytes_per_scanline;
+                last_scanline = current_scanline;
+                scanline_data = scanline_data_tail;
             }
 
             println!("total_defilter took {:?}", total_defilter);
@@ -797,7 +820,8 @@ fn process_scanlines(
         },
         InterlaceMethod::Adam7 => {
             let max_bytes_per_scanline = header.width as usize * bytes_per_pixel;
-            let mut last_scanline = vec![0u8; max_bytes_per_scanline];
+
+            let zero_scanline = vec![0u8; max_bytes_per_scanline];
 
             // Adam7 Interlacing Pattern
             // 1 6 4 6 2 6 4 6
@@ -862,18 +886,14 @@ fn process_scanlines(
                 let bytes_per_scanline: usize =
                     bytes_per_scanline.try_into().expect("bytes_per_scanline overflowed a usize");
 
-                let last_scanline = &mut last_scanline[..(bytes_per_scanline)];
-                for byte in last_scanline.iter_mut() {
-                    *byte = 0;
-                }
+                let mut last_scanline = &zero_scanline[..(bytes_per_scanline)];
 
                 for y in 0..pass_height {
-                    let filter_type = FilterType::try_from(scanline_data[cursor])
+                    let filter_type = FilterType::try_from(scanline_data[0])
                         .map_err(|_| DecodeError::InvalidFilterType)?;
-                    cursor += 1;
 
-                    let current_scanline =
-                        &mut scanline_data[cursor..(cursor + bytes_per_scanline)];
+                    let (current_scanline, scanline_data_tail) =
+                        scanline_data[1..].split_at_mut(bytes_per_scanline);
 
                     match bytes_per_pixel {
                         1 => defilter::<1>(filter_type, current_scanline, &last_scanline),
@@ -916,37 +936,14 @@ fn process_scanlines(
                         output_rgba[output_idx + 3] = a;
                     }
 
-                    last_scanline.copy_from_slice(current_scanline);
-
-                    cursor += bytes_per_scanline;
+                    last_scanline = current_scanline;
+                    scanline_data = scanline_data_tail;
                 }
             }
         },
     }
 
     Ok(())
-}
-
-fn paeth_predictor(a: i16, b: i16, c: i16) -> u8 {
-    // TODO(bschwind) - Accept i16 or convert once and store in a temp.
-    // a = left pixel
-    // b = above pixel
-    // c = upper left
-    let p = a + b - c;
-    let pa = (p - a).abs();
-    let pb = (p - b).abs();
-    let pc = (p - c).abs();
-
-    let first = pa <= pb && pa <= pc;
-    let first_bitmask = first as u8 * 255u8;
-
-    let second = !first && pb <= pc;
-    let second_bitmask = second as u8 * 255u8;
-
-    let third = !first && !second;
-    let third_bitmask = third as u8 * 255u8;
-
-    (first_bitmask & a as u8) | (second_bitmask & b as u8) | (third_bitmask & c as u8)
 }
 
 pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
