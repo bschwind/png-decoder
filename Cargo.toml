@@ -10,7 +10,7 @@ readme = "README.md"
 documentation = "https://docs.rs/png-decoder"
 keywords = ["png", "image", "decoder"]
 categories = ["multimedia::images"]
-license-file = "MIT"
+license = "MIT"
 
 exclude = [
     "test_pngs/*",
