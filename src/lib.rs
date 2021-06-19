@@ -1,8 +1,9 @@
 #![no_std]
 
+#[macro_use]
 extern crate alloc;
 
-#[macro_use]
+#[cfg(test)]
 extern crate std;
 
 use alloc::vec::Vec;
