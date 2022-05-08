@@ -112,16 +112,11 @@ fn u16_to_u8(val: u16) -> u8 {
     (val >> 8) as u8
 }
 
+#[derive(Default)]
 struct AncillaryChunks<'a> {
     palette: Option<&'a [u8]>,
     transparency: Option<TransparencyChunk<'a>>,
     background: Option<&'a [u8]>,
-}
-
-impl<'a> Default for AncillaryChunks<'a> {
-    fn default() -> Self {
-        AncillaryChunks { palette: None, transparency: None, background: None }
-    }
 }
 
 struct ScanlineIterator<'a> {
@@ -553,7 +548,7 @@ impl ChunkType {
 struct Chunk<'a> {
     chunk_type: ChunkType,
     data: &'a [u8],
-    crc: u32,
+    _crc: u32,
 }
 
 impl<'a> Chunk<'a> {
@@ -636,7 +631,7 @@ fn read_chunk(bytes: &[u8]) -> Result<Chunk, DecodeError> {
         return Err(DecodeError::IncorrectChunkCrc);
     }
 
-    Ok(Chunk { chunk_type, data: &data_for_crc[4..], crc })
+    Ok(Chunk { chunk_type, data: &data_for_crc[4..], _crc: crc })
 }
 
 fn defilter(
@@ -835,7 +830,7 @@ fn process_scanlines(
                             bytes_per_pixel,
                             x,
                             current_scanline,
-                            &last_scanline,
+                            last_scanline,
                         );
                         current_scanline[x] = unfiltered_byte;
                     }
