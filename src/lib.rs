@@ -15,7 +15,7 @@ use num_enum::TryFromPrimitive;
 const PNG_MAGIC_BYTES: &[u8] = &[137, 80, 78, 71, 13, 10, 26, 10];
 
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 pub enum BitDepth {
     One = 1,
     Two = 2,
@@ -25,7 +25,7 @@ pub enum BitDepth {
 }
 
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 pub enum ColorType {
     Grayscale = 0,
     Rgb = 2,
@@ -408,19 +408,19 @@ impl<'a> Iterator for ScanlineIterator<'a> {
 }
 
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 pub enum CompressionMethod {
     Deflate = 0,
 }
 
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 pub enum FilterMethod {
     Adaptive = 0,
 }
 
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 pub enum FilterType {
     None = 0,
     Sub = 1,
@@ -430,13 +430,13 @@ pub enum FilterType {
 }
 
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq, TryFromPrimitive)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 pub enum InterlaceMethod {
     None = 0,
     Adam7 = 1,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PngHeader {
     pub width: u32,
     pub height: u32,
@@ -480,7 +480,7 @@ impl PngHeader {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
     InvalidMagicBytes,
     MissingBytes,
@@ -504,7 +504,7 @@ pub enum DecodeError {
     IntegerOverflow,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Color {
     r: u8,
     g: u8,
@@ -512,7 +512,7 @@ pub struct Color {
     a: u8,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ChunkType {
     ImageHeader,
     Palette,
@@ -928,6 +928,7 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
                 ancillary_chunks.transparency = TransparencyChunk::from_chunk(&chunk, pixel_type)
             },
             ChunkType::Background => ancillary_chunks.background = Some(chunk.data),
+            ChunkType::ImageEnd => break,
             _ => {},
         }
 
@@ -1008,5 +1009,13 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_trailing_zero() {
+        let path = "test_pngs/trailing_zero.png";
+        let png_bytes = std::fs::read(path).unwrap();
+        let (_header, _decoded) = decode(&png_bytes)
+            .expect("A PNG with trailing zeroes after the ImageEnd chunk should be readable");
     }
 }
