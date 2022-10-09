@@ -928,6 +928,7 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
                 ancillary_chunks.transparency = TransparencyChunk::from_chunk(&chunk, pixel_type)
             },
             ChunkType::Background => ancillary_chunks.background = Some(chunk.data),
+            ChunkType::ImageEnd => break,
             _ => {},
         }
 
@@ -1008,5 +1009,13 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_trailing_zero() {
+        let path = "test_pngs/trailing_zero.png";
+        let png_bytes = std::fs::read(path).unwrap();
+        let (header, decoded) = decode(&png_bytes)
+            .expect("A PNG with trailing zeroes after the ImageEnd chunk should be readable");
     }
 }
