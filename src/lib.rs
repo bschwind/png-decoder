@@ -682,199 +682,200 @@ fn defilter(
     }
 }
 
-fn process_scanlines(
-    header: &PngHeader,
-    scanline_data: &mut [u8],
-    output_rgba: &mut [u8],
-    ancillary_chunks: &AncillaryChunks,
+pub struct UndecodedPng<'a> {
+    pub header: PngHeader,
+    scanline_data: Vec<u8>,
+    ancillary_chunks: AncillaryChunks<'a>,
     pixel_type: PixelType,
-) -> Result<(), DecodeError> {
-    let mut cursor = 0;
-    let bytes_per_pixel: usize =
-        ((header.bit_depth as usize * header.color_type.sample_multiplier()) + 7) / 8;
+}
 
-    match header.interlace_method {
-        InterlaceMethod::None => {
-            // TODO(bschwind) - Deduplicate this logic.
-            let bytes_per_scanline = ((header.width as u64
-                * header.bit_depth as u64
-                * header.color_type.sample_multiplier() as u64)
-                + 7)
-                / 8;
-            let bytes_per_scanline: usize =
-                bytes_per_scanline.try_into().map_err(|_| DecodeError::IntegerOverflow)?;
+impl<'a> UndecodedPng<'a> {
+    pub fn process_scanlines<F: FnMut(usize,u8,u8,u8,u8)>(
+        &mut self,
+        mut save: F,
+    ) -> Result<(), DecodeError> {
+        let mut cursor = 0;
+        let bytes_per_pixel: usize =
+            ((self.header.bit_depth as usize * self.header.color_type.sample_multiplier()) + 7) / 8;
+        let header = &self.header;
 
-            let mut last_scanline = vec![0u8; bytes_per_scanline];
-
-            for y in 0..header.height {
-                let filter_type = FilterType::try_from(scanline_data[cursor])
-                    .map_err(|_| DecodeError::InvalidFilterType)?;
-                cursor += 1;
-
-                let current_scanline = &mut scanline_data[cursor..(cursor + bytes_per_scanline)];
-
-                for x in 0..(bytes_per_scanline) {
-                    let unfiltered_byte =
-                        defilter(filter_type, bytes_per_pixel, x, current_scanline, &last_scanline);
-                    current_scanline[x] = unfiltered_byte;
-                }
-
-                let scanline_iter = ScanlineIterator::new(
-                    header.width,
-                    pixel_type,
-                    current_scanline,
-                    ancillary_chunks,
-                );
-
-                for (idx, (r, g, b, a)) in scanline_iter.enumerate() {
-                    let (output_x, output_y) = (idx, y);
-
-                    let output_idx =
-                        (output_y as u64 * header.width as u64 * 4) + (output_x as u64 * 4);
-                    let output_idx: usize =
-                        output_idx.try_into().map_err(|_| DecodeError::IntegerOverflow)?;
-
-                    output_rgba[output_idx] = r;
-                    output_rgba[output_idx + 1] = g;
-                    output_rgba[output_idx + 2] = b;
-                    output_rgba[output_idx + 3] = a;
-                }
-
-                last_scanline.copy_from_slice(current_scanline);
-                cursor += bytes_per_scanline;
-            }
-        },
-        InterlaceMethod::Adam7 => {
-            let max_bytes_per_scanline = header.width as usize * bytes_per_pixel;
-            let mut last_scanline = vec![0u8; max_bytes_per_scanline];
-
-            // Adam7 Interlacing Pattern
-            // 1 6 4 6 2 6 4 6
-            // 7 7 7 7 7 7 7 7
-            // 5 6 5 6 5 6 5 6
-            // 7 7 7 7 7 7 7 7
-            // 3 6 4 6 3 6 4 6
-            // 7 7 7 7 7 7 7 7
-            // 5 6 5 6 5 6 5 6
-            // 7 7 7 7 7 7 7 7
-
-            for pass in 1..=7 {
-                let (pass_width, pass_height) = match pass {
-                    1 => {
-                        let pass_width = (header.width + 7) / 8;
-                        let pass_height = (header.height + 7) / 8;
-                        (pass_width, pass_height)
-                    },
-                    2 => {
-                        let pass_width = (header.width / 8) + ((header.width % 8) / 5);
-                        let pass_height = (header.height + 7) / 8;
-                        (pass_width, pass_height)
-                    },
-                    3 => {
-                        let pass_width = ((header.width / 8) * 2) + (header.width % 8 + 3) / 4;
-                        let pass_height = (header.height / 8) + ((header.height % 8) / 5);
-                        (pass_width, pass_height)
-                    },
-                    4 => {
-                        let pass_width = ((header.width / 8) * 2) + (header.width % 8 + 1) / 4;
-                        let pass_height = (header.height + 3) / 4;
-                        (pass_width, pass_height)
-                    },
-                    5 => {
-                        let pass_width = (header.width / 2) + (header.width % 2);
-                        let pass_height = ((header.height / 8) * 2) + (header.height % 8 + 1) / 4;
-                        (pass_width, pass_height)
-                    },
-                    6 => {
-                        let pass_width = header.width / 2;
-                        let pass_height = (header.height / 2) + (header.height % 2);
-                        (pass_width, pass_height)
-                    },
-                    7 => {
-                        let pass_width = header.width;
-                        let pass_height = header.height / 2;
-                        (pass_width, pass_height)
-                    },
-                    _ => (0, 0),
-                };
-
-                // Skip empty passes.
-                if pass_width == 0 || pass_height == 0 {
-                    continue;
-                }
-
-                let bytes_per_scanline = ((pass_width as u64
+        match header.interlace_method {
+            InterlaceMethod::None => {
+                // TODO(bschwind) - Deduplicate this logic.
+                let bytes_per_scanline = ((self.header.width as u64
                     * header.bit_depth as u64
                     * header.color_type.sample_multiplier() as u64)
                     + 7)
                     / 8;
                 let bytes_per_scanline: usize =
-                    bytes_per_scanline.try_into().expect("bytes_per_scanline overflowed a usize");
+                    bytes_per_scanline.try_into().map_err(|_| DecodeError::IntegerOverflow)?;
 
-                let last_scanline = &mut last_scanline[..(bytes_per_scanline)];
-                for byte in last_scanline.iter_mut() {
-                    *byte = 0;
-                }
+                let mut last_scanline = vec![0u8; bytes_per_scanline];
 
-                for y in 0..pass_height {
-                    let filter_type = FilterType::try_from(scanline_data[cursor])
+                for y in 0..header.height {
+                    let filter_type = FilterType::try_from(self.scanline_data[cursor])
                         .map_err(|_| DecodeError::InvalidFilterType)?;
                     cursor += 1;
 
-                    let current_scanline =
-                        &mut scanline_data[cursor..(cursor + bytes_per_scanline)];
+                    let current_scanline = &mut self.scanline_data[cursor..(cursor + bytes_per_scanline)];
 
                     for x in 0..(bytes_per_scanline) {
-                        let unfiltered_byte = defilter(
-                            filter_type,
-                            bytes_per_pixel,
-                            x,
-                            current_scanline,
-                            last_scanline,
-                        );
+                        let unfiltered_byte =
+                            defilter(filter_type, bytes_per_pixel, x, current_scanline, &last_scanline);
                         current_scanline[x] = unfiltered_byte;
                     }
 
                     let scanline_iter = ScanlineIterator::new(
-                        pass_width,
-                        pixel_type,
+                        header.width,
+                        self.pixel_type,
                         current_scanline,
-                        ancillary_chunks,
+                        &self.ancillary_chunks,
                     );
 
                     for (idx, (r, g, b, a)) in scanline_iter.enumerate() {
-                        // Put rgba in output_rgba
-                        let (output_x, output_y) = match pass {
-                            1 => (idx * 8, y * 8),
-                            2 => (idx * 8 + 4, y * 8),
-                            3 => (idx * 4, y * 8 + 4),
-                            4 => (idx * 4 + 2, y * 4),
-                            5 => (idx * 2, y * 4 + 2),
-                            6 => (idx * 2 + 1, y * 2),
-                            7 => (idx, y * 2 + 1),
-                            _ => (0, 0),
-                        };
+                        let (output_x, output_y) = (idx, y);
 
                         let output_idx =
-                            (output_y as u64 * header.width as u64 * 4) + (output_x as u64 * 4);
+                            (output_y as u64 * header.width as u64) + output_x as u64;
                         let output_idx: usize =
                             output_idx.try_into().map_err(|_| DecodeError::IntegerOverflow)?;
 
-                        output_rgba[output_idx] = r;
-                        output_rgba[output_idx + 1] = g;
-                        output_rgba[output_idx + 2] = b;
-                        output_rgba[output_idx + 3] = a;
+                        save(output_idx, r, g, b, a);
                     }
 
                     last_scanline.copy_from_slice(current_scanline);
-
                     cursor += bytes_per_scanline;
                 }
-            }
-        },
-    }
+            },
+            InterlaceMethod::Adam7 => {
+                let max_bytes_per_scanline = header.width as usize * bytes_per_pixel;
+                let mut last_scanline = vec![0u8; max_bytes_per_scanline];
 
-    Ok(())
+                // Adam7 Interlacing Pattern
+                // 1 6 4 6 2 6 4 6
+                // 7 7 7 7 7 7 7 7
+                // 5 6 5 6 5 6 5 6
+                // 7 7 7 7 7 7 7 7
+                // 3 6 4 6 3 6 4 6
+                // 7 7 7 7 7 7 7 7
+                // 5 6 5 6 5 6 5 6
+                // 7 7 7 7 7 7 7 7
+
+                for pass in 1..=7 {
+                    let (pass_width, pass_height) = match pass {
+                        1 => {
+                            let pass_width = (header.width + 7) / 8;
+                            let pass_height = (header.height + 7) / 8;
+                            (pass_width, pass_height)
+                        },
+                        2 => {
+                            let pass_width = (header.width / 8) + ((header.width % 8) / 5);
+                            let pass_height = (header.height + 7) / 8;
+                            (pass_width, pass_height)
+                        },
+                        3 => {
+                            let pass_width = ((header.width / 8) * 2) + (header.width % 8 + 3) / 4;
+                            let pass_height = (header.height / 8) + ((header.height % 8) / 5);
+                            (pass_width, pass_height)
+                        },
+                        4 => {
+                            let pass_width = ((header.width / 8) * 2) + (header.width % 8 + 1) / 4;
+                            let pass_height = (header.height + 3) / 4;
+                            (pass_width, pass_height)
+                        },
+                        5 => {
+                            let pass_width = (header.width / 2) + (header.width % 2);
+                            let pass_height = ((header.height / 8) * 2) + (header.height % 8 + 1) / 4;
+                            (pass_width, pass_height)
+                        },
+                        6 => {
+                            let pass_width = header.width / 2;
+                            let pass_height = (header.height / 2) + (header.height % 2);
+                            (pass_width, pass_height)
+                        },
+                        7 => {
+                            let pass_width = header.width;
+                            let pass_height = header.height / 2;
+                            (pass_width, pass_height)
+                        },
+                        _ => (0, 0),
+                    };
+
+                    // Skip empty passes.
+                    if pass_width == 0 || pass_height == 0 {
+                        continue;
+                    }
+
+                    let bytes_per_scanline = ((pass_width as u64
+                        * header.bit_depth as u64
+                        * header.color_type.sample_multiplier() as u64)
+                        + 7)
+                        / 8;
+                    let bytes_per_scanline: usize =
+                        bytes_per_scanline.try_into().expect("bytes_per_scanline overflowed a usize");
+
+                    let last_scanline = &mut last_scanline[..(bytes_per_scanline)];
+                    for byte in last_scanline.iter_mut() {
+                        *byte = 0;
+                    }
+
+                    for y in 0..pass_height {
+                        let filter_type = FilterType::try_from(self.scanline_data[cursor])
+                            .map_err(|_| DecodeError::InvalidFilterType)?;
+                        cursor += 1;
+
+                        let current_scanline =
+                            &mut self.scanline_data[cursor..(cursor + bytes_per_scanline)];
+
+                        for x in 0..(bytes_per_scanline) {
+                            let unfiltered_byte = defilter(
+                                filter_type,
+                                bytes_per_pixel,
+                                x,
+                                current_scanline,
+                                last_scanline,
+                            );
+                            current_scanline[x] = unfiltered_byte;
+                        }
+
+                        let scanline_iter = ScanlineIterator::new(
+                            pass_width,
+                            self.pixel_type,
+                            current_scanline,
+                            & self.ancillary_chunks,
+                        );
+
+                        for (idx, (r, g, b, a)) in scanline_iter.enumerate() {
+                            // Put rgba in output_rgba
+                            let (output_x, output_y) = match pass {
+                                1 => (idx * 8, y * 8),
+                                2 => (idx * 8 + 4, y * 8),
+                                3 => (idx * 4, y * 8 + 4),
+                                4 => (idx * 4 + 2, y * 4),
+                                5 => (idx * 2, y * 4 + 2),
+                                6 => (idx * 2 + 1, y * 2),
+                                7 => (idx, y * 2 + 1),
+                                _ => (0, 0),
+                            };
+
+                            let output_idx =
+                                (output_y as u64 * header.width as u64) + output_x as u64;
+                            let output_idx: usize =
+                                output_idx.try_into().map_err(|_| DecodeError::IntegerOverflow)?;
+
+                            save(output_idx, r, g, b, a);
+                        }
+
+                        last_scanline.copy_from_slice(current_scanline);
+
+                        cursor += bytes_per_scanline;
+                    }
+                }
+            },
+        }
+
+        Ok(())
+    }
 }
 
 fn paeth_predictor(a: i16, b: i16, c: i16) -> u8 {
@@ -896,7 +897,7 @@ fn paeth_predictor(a: i16, b: i16, c: i16) -> u8 {
     }
 }
 
-pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
+pub fn pre_decode(bytes: &[u8]) -> Result<UndecodedPng, DecodeError> {
     if bytes.len() < PNG_MAGIC_BYTES.len() {
         return Err(DecodeError::MissingBytes);
     }
@@ -912,8 +913,7 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
 
     let mut bytes = &bytes[header_chunk.byte_size()..];
 
-    let mut compressed_data: Vec<u8> =
-        Vec::with_capacity(header.width as usize * header.height as usize * 3);
+    let mut compressed_data: Vec<u8> = Vec::new();
 
     let pixel_type = PixelType::new(header.color_type, header.bit_depth)?;
     let mut ancillary_chunks = AncillaryChunks::default();
@@ -935,21 +935,28 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
         bytes = &bytes[chunk.byte_size()..];
     }
 
-    let mut scanline_data = miniz_oxide::inflate::decompress_to_vec_zlib(&compressed_data)
+    let scanline_data = miniz_oxide::inflate::decompress_to_vec_zlib(&compressed_data)
         .map_err(DecodeError::Decompress)?;
 
-    // For now, output data is always RGBA, 1 byte per channel.
-    let mut output_rgba = vec![0u8; header.width as usize * header.height as usize * 4];
+    Ok(UndecodedPng{ header, scanline_data, ancillary_chunks, pixel_type })
+}
 
-    process_scanlines(
-        &header,
-        &mut scanline_data,
-        &mut output_rgba,
-        &ancillary_chunks,
-        pixel_type,
+pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
+    let mut undecoded = pre_decode(bytes)?;
+
+    // For now, output data is always RGBA, 1 byte per channel.
+    let mut output_rgba = vec![0u8; undecoded.header.width as usize * undecoded.header.height as usize * 4];
+
+    undecoded.process_scanlines(
+        |i,r,g,b,a| {
+                          output_rgba[i*4] = r;
+                          output_rgba[i*4 + 1] = g;
+                          output_rgba[i*4 + 2] = b;
+                          output_rgba[i*4 + 3] = a;
+        },
     )?;
 
-    Ok((header, output_rgba))
+    Ok((undecoded.header, output_rgba))
 }
 
 #[cfg(test)]
