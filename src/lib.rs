@@ -505,14 +505,6 @@ pub enum DecodeError {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Color {
-    r: u8,
-    g: u8,
-    b: u8,
-    a: u8,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ChunkType {
     ImageHeader,
     Palette,
