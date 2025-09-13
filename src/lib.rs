@@ -934,7 +934,9 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
     }
 
     let mut scanline_data = miniz_oxide::inflate::decompress_to_vec_zlib(&compressed_data)
-        .map_err(DecodeError::Decompress)?;
+        .map_err(|miniz_oxide::inflate::DecompressError { status, output: _ }| {
+            DecodeError::Decompress(status)
+        })?;
 
     // For now, output data is always RGBA, 1 byte per channel.
     let mut output_rgba = vec![0u8; header.width as usize * header.height as usize * 4];

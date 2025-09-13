@@ -1,6 +1,6 @@
 [package]
 name = "png-decoder"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Brian Schwind <brianmschwind@gmail.com>"]
 edition = "2018"
 repository = "https://github.com/bschwind/png-decoder"
@@ -18,8 +18,8 @@ exclude = [
 
 [dependencies]
 crc32fast = { version = "1", default-features = false }
-num_enum = { version = "0.5", default-features = false }
-miniz_oxide = { version = "0.4", default-features = false }
+num_enum = { version = "0.7", default-features = false }
+miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
 
 [dev-dependencies]
 image = { version = "0.23", features = ["png"] }
