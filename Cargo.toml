@@ -18,7 +18,7 @@ exclude = [
 
 [dependencies]
 crc32fast = { version = "1", default-features = false }
-num_enum = { version = "0.5", default-features = false }
+num_enum = { version = "0.7", default-features = false }
 miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
 
 [dev-dependencies]
