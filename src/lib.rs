@@ -554,7 +554,7 @@ struct Chunk<'a> {
 impl<'a> Chunk<'a> {
     fn byte_size(&self) -> usize {
         // length bytes + chunk type bytes + data bytes + crc bytes
-        4 + 4 + self.data.len() as usize + 4
+        4 + 4 + self.data.len() + 4
     }
 }
 
@@ -603,7 +603,7 @@ fn read_u32(bytes: &[u8], offset: usize) -> u32 {
     u32::from_be_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
 }
 
-fn read_chunk(bytes: &[u8]) -> Result<Chunk, DecodeError> {
+fn read_chunk(bytes: &[u8]) -> Result<Chunk<'_>, DecodeError> {
     if bytes.len() < 4 {
         return Err(DecodeError::MissingBytes);
     }
@@ -691,16 +691,15 @@ fn process_scanlines(
 ) -> Result<(), DecodeError> {
     let mut cursor = 0;
     let bytes_per_pixel: usize =
-        ((header.bit_depth as usize * header.color_type.sample_multiplier()) + 7) / 8;
+        (header.bit_depth as usize * header.color_type.sample_multiplier()).div_ceil(8);
 
     match header.interlace_method {
         InterlaceMethod::None => {
             // TODO(bschwind) - Deduplicate this logic.
-            let bytes_per_scanline = ((header.width as u64
+            let bytes_per_scanline = (header.width as u64
                 * header.bit_depth as u64
                 * header.color_type.sample_multiplier() as u64)
-                + 7)
-                / 8;
+                .div_ceil(8);
             let bytes_per_scanline: usize =
                 bytes_per_scanline.try_into().map_err(|_| DecodeError::IntegerOverflow)?;
 
@@ -761,23 +760,23 @@ fn process_scanlines(
             for pass in 1..=7 {
                 let (pass_width, pass_height) = match pass {
                     1 => {
-                        let pass_width = (header.width + 7) / 8;
-                        let pass_height = (header.height + 7) / 8;
+                        let pass_width = header.width.div_ceil(8);
+                        let pass_height = header.height.div_ceil(8);
                         (pass_width, pass_height)
                     },
                     2 => {
                         let pass_width = (header.width / 8) + ((header.width % 8) / 5);
-                        let pass_height = (header.height + 7) / 8;
+                        let pass_height = header.height.div_ceil(8);
                         (pass_width, pass_height)
                     },
                     3 => {
-                        let pass_width = ((header.width / 8) * 2) + (header.width % 8 + 3) / 4;
+                        let pass_width = ((header.width / 8) * 2) + (header.width % 8).div_ceil(4);
                         let pass_height = (header.height / 8) + ((header.height % 8) / 5);
                         (pass_width, pass_height)
                     },
                     4 => {
                         let pass_width = ((header.width / 8) * 2) + (header.width % 8 + 1) / 4;
-                        let pass_height = (header.height + 3) / 4;
+                        let pass_height = header.height.div_ceil(4);
                         (pass_width, pass_height)
                     },
                     5 => {
@@ -803,11 +802,10 @@ fn process_scanlines(
                     continue;
                 }
 
-                let bytes_per_scanline = ((pass_width as u64
+                let bytes_per_scanline = (pass_width as u64
                     * header.bit_depth as u64
                     * header.color_type.sample_multiplier() as u64)
-                    + 7)
-                    / 8;
+                    .div_ceil(8);
                 let bytes_per_scanline: usize =
                     bytes_per_scanline.try_into().expect("bytes_per_scanline overflowed a usize");
 
