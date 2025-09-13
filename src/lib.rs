@@ -677,7 +677,7 @@ fn defilter(
 fn process_scanlines(
     header: &PngHeader,
     scanline_data: &mut [u8],
-    output_rgba: &mut [u8],
+    output_rgba: &mut [[u8; 4]],
     ancillary_chunks: &AncillaryChunks,
     pixel_type: PixelType,
 ) -> Result<(), DecodeError> {
@@ -720,15 +720,11 @@ fn process_scanlines(
                 for (idx, (r, g, b, a)) in scanline_iter.enumerate() {
                     let (output_x, output_y) = (idx, y);
 
-                    let output_idx =
-                        (output_y as u64 * header.width as u64 * 4) + (output_x as u64 * 4);
+                    let output_idx = (output_y as u64 * header.width as u64) + (output_x as u64);
                     let output_idx: usize =
                         output_idx.try_into().map_err(|_| DecodeError::IntegerOverflow)?;
 
-                    output_rgba[output_idx] = r;
-                    output_rgba[output_idx + 1] = g;
-                    output_rgba[output_idx + 2] = b;
-                    output_rgba[output_idx + 3] = a;
+                    output_rgba[output_idx] = [r, g, b, a];
                 }
 
                 last_scanline.copy_from_slice(current_scanline);
@@ -846,14 +842,11 @@ fn process_scanlines(
                         };
 
                         let output_idx =
-                            (output_y as u64 * header.width as u64 * 4) + (output_x as u64 * 4);
+                            (output_y as u64 * header.width as u64) + (output_x as u64);
                         let output_idx: usize =
                             output_idx.try_into().map_err(|_| DecodeError::IntegerOverflow)?;
 
-                        output_rgba[output_idx] = r;
-                        output_rgba[output_idx + 1] = g;
-                        output_rgba[output_idx + 2] = b;
-                        output_rgba[output_idx + 3] = a;
+                        output_rgba[output_idx] = [r, g, b, a];
                     }
 
                     last_scanline.copy_from_slice(current_scanline);
@@ -886,7 +879,14 @@ fn paeth_predictor(a: i16, b: i16, c: i16) -> u8 {
     }
 }
 
-pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
+/// Decodes the provided PNG into RGBA pixels.
+///
+/// The returned [`PngHeader`] contains the image’s size, and other PNG metadata which is not
+/// necessary to make use of the pixels (the returned format is always 8-bit-per-component RGBA).
+///
+/// The returned [`Vec`] contains the pixels, represented as `[r, g, b, a]` arrays.
+/// Its length will be equal to `header.width * header.height`.
+pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<[u8; 4]>), DecodeError> {
     if bytes.len() < PNG_MAGIC_BYTES.len() {
         return Err(DecodeError::MissingBytes);
     }
@@ -931,7 +931,7 @@ pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<u8>), DecodeError> {
         })?;
 
     // For now, output data is always RGBA, 1 byte per channel.
-    let mut output_rgba = vec![0u8; header.width as usize * header.height as usize * 4];
+    let mut output_rgba = vec![[0u8; 4]; header.width as usize * header.height as usize];
 
     process_scanlines(
         &header,
@@ -962,7 +962,7 @@ mod tests {
                 if extension.to_ascii_lowercase().as_str() == "png" {
                     let png_bytes = std::fs::read(&path).unwrap();
 
-                    let (_header, decoded) = if path
+                    let (_header, decoded): (PngHeader, Vec<[u8; 4]>) = if path
                         .file_stem()
                         .expect("expected png path to be a file")
                         .to_string_lossy()
@@ -973,6 +973,7 @@ mod tests {
                     } else {
                         decode(&png_bytes).unwrap()
                     };
+                    let decoded: Vec<u8> = decoded.into_flattened();
 
                     // Uncomment to inspect output.png for debugging.
                     // let image_buf: image::ImageBuffer<image::Rgba<u8>, _> =
