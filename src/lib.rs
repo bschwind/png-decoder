@@ -886,6 +886,8 @@ fn paeth_predictor(a: i16, b: i16, c: i16) -> u8 {
 ///
 /// The returned [`Vec`] contains the pixels, represented as `[r, g, b, a]` arrays.
 /// Its length will be equal to `header.width * header.height`.
+/// (If you need a `Vec<u8>` of length `header.width * header.height * 4` instead, you can use
+/// [`Vec::into_flattened()`] to convert it.)
 pub fn decode(bytes: &[u8]) -> Result<(PngHeader, Vec<[u8; 4]>), DecodeError> {
     if bytes.len() < PNG_MAGIC_BYTES.len() {
         return Err(DecodeError::MissingBytes);
